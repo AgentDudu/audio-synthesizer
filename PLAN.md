@@ -3,8 +3,8 @@
 Java (Swing) UI ⇄ JNI ⇄ C++ audio engine (RtAudio). Windows-first, designed so Linux/macOS
 later is a CMake flag change, not a rewrite.
 
-Status: **keyboard UI playable** — two-octave on-screen piano (mouse + computer keys) drives the
-engine. M0 `5eb7d3c`, M1 `b08ee54`. Next: knobs + scope (M3), then MIDI-file source (M4a).
+Status: **full-keyboard UI playable** — the whole 88-key piano (A0-C8) is on screen and clickable,
+driving the engine. M0 `5eb7d3c`, M1 `b08ee54`. Next: knobs + scope (M3), then MIDI-file source (M4a).
 
 ---
 
@@ -133,7 +133,7 @@ audio-synthesizer/
       engine_tests.cpp           # assert-based, no framework, no audio device needed
   java/src/main/java/synth/
     App.java            Engine.java        # Engine = all `native` declarations + loadLibrary
-    KeyboardPanel.java                     # done: two-octave piano, mouse + computer keys
+    KeyboardPanel.java                     # done: full 88-key piano, mouse + computer keys
     UiSelfTest.java                        # done: headless UI check + keyboard PNG render
     KnobPanel.java  ScopePanel.java  MidiIn.java          # M3 / M4
 ```
@@ -307,11 +307,14 @@ input device exists, which is exactly this machine's current state.
    feature branches go through PRs.
 7. **Computer-key map** is the tracker layout — `a w s e d f t g y h u j k o l p ;` — position in
    that string *is* the semitone above C4. One string, no table to keep in sync. Left/right arrows
-   shift octave (±3 clamp), Esc kills all notes.
+   shift that 17-semitone window (clamped so it never leaves the piano), Esc kills all notes.
+   The whole keyboard is always visible: 52 white keys at 18 px = 936 px wide, no scrolling, and a
+   blue bar under the keys shows where the computer-key window currently sits.
 8. **Focus loss sends note-off for every held note** (risk R12). Held notes live in one Java-side
    `LinkedHashSet`, which also turns key auto-repeat into a no-op instead of a retrigger.
 9. **UI is tested headlessly** (`synth.UiSelfTest`): key map, pixel→note hit-testing, mouse drag,
-   focus-loss clear, then the engine's `activeVoices()`. AWT swallows synthetic `FocusEvent`s, so
+   focus-loss clear, then the engine's `activeVoices()`. It also walks every white and black key and
+   asserts all 88 notes A0-C8 are reachable by click. AWT swallows synthetic `FocusEvent`s, so
    the test calls the registered `FocusListener` directly. Its `png` mode renders the keyboard to
    `build/keyboard.png`; geometry was checked by reading pixel runs, not by eyeballing.
 
