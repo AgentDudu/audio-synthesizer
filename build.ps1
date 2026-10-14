@@ -21,11 +21,13 @@ if ($LASTEXITCODE -ne 0) { throw "cmake configure failed" }
 & $cmake --build build/native
 if ($LASTEXITCODE -ne 0) { throw "cmake build failed" }
 
-if ($Target -eq 'probe' -or $Target -eq 'run') {
+if ($Target -eq 'probe' -or $Target -eq 'run' -or $Target -eq 'smoke') {
     java "-Djava.library.path=$PSScriptRoot/build/native" -cp build/classes synth.App $Target
     if ($LASTEXITCODE -ne 0) { throw "java failed" }
 }
 if ($Target -eq 'test') {
     & "$gccDir/ctest.exe" --test-dir build/native --output-on-failure
     if ($LASTEXITCODE -ne 0) { throw "ctest failed" }
+    java "-Djava.library.path=$PSScriptRoot/build/native" -cp build/classes synth.UiSelfTest
+    if ($LASTEXITCODE -ne 0) { throw "UI self-test failed" }
 }
