@@ -3,8 +3,8 @@
 Java (Swing) UI ⇄ JNI ⇄ C++ audio engine (RtAudio). Windows-first, designed so Linux/macOS
 later is a CMake flag change, not a rewrite.
 
-Status: **full-keyboard UI playable** — the whole 88-key piano (A0-C8) is on screen and clickable,
-driving the engine. M0 `5eb7d3c`, M1 `b08ee54`. Next: knobs + scope (M3), then MIDI-file source (M4a).
+Status: **full-keyboard UI playable** — the whole 88-key piano (A0-C8) is on screen, scales with
+the window, and drives the engine. M0 `5eb7d3c`, M1 `b08ee54`. Next: knobs + scope (M3).
 
 ---
 
@@ -308,7 +308,7 @@ input device exists, which is exactly this machine's current state.
 7. **Computer-key map** is the tracker layout — `a w s e d f t g y h u j k o l p ;` — position in
    that string *is* the semitone above C4. One string, no table to keep in sync. Left/right arrows
    shift that 17-semitone window (clamped so it never leaves the piano), Esc kills all notes.
-   The whole keyboard is always visible: 52 white keys at 18 px = 936 px wide, no scrolling, and a
+   The whole keyboard is always visible: 52 white keys, 936 px preferred width, no scrolling, and a
    blue bar under the keys shows where the computer-key window currently sits.
 8. **Focus loss sends note-off for every held note** (risk R12). Held notes live in one Java-side
    `LinkedHashSet`, which also turns key auto-repeat into a no-op instead of a retrigger.
@@ -319,6 +319,13 @@ input device exists, which is exactly this machine's current state.
    `build/keyboard.png`; geometry was checked by reading pixel runs, not by eyeballing.
 
 ---
+
+10. **Keyboard geometry is a function of the component size**, not constants: key width, black-key
+    width/height, label size and the marker bar all come from `getWidth()`/`getHeight()`, and
+    painting and hit-testing call the same helpers — so resizing the window cannot desync what you
+    see from what you click. Minimum size 320x60. Consequence worth knowing: a black key is centred
+    exactly on the boundary between two white keys, so the pixel under its left half is the lower
+    white key and under its right half is the upper one.
 
 ## 9. Explicitly out of scope for v1
 
