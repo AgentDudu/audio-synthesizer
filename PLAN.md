@@ -3,7 +3,8 @@
 Java (Swing) UI ⇄ JNI ⇄ C++ audio engine (RtAudio). Windows-first, designed so Linux/macOS
 later is a CMake flag change, not a rewrite.
 
-Status: plan agreed, nothing implemented yet.
+Status: **M0 + M1 done** (M0 `5eb7d3c`) — engine plays through WASAPI with 0 underruns, offline
+WAV bounce verified. Next: M2 (Swing keyboard).
 
 ---
 
@@ -23,6 +24,7 @@ Verified on `DESKTOP-F2345QN` (2026-10-15):
 | git / gh | git 2.54.0, `gh` 2.102.0, GCM installed | no auth setup needed |
 | make / ninja | `C:\mingw64\bin\make.exe`, `mingw32-make.exe`, `ninja.exe` all present | `MinGW Makefiles` and `Ninja` generators both available |
 | winget | v1.29.380 (choco absent) | escape hatch if a tool ever has to be installed |
+| **Two MinGW installs on PATH** | `C:\Strawberry\c\bin` = g++ 13.2.0 + CMake 3.29.2; `C:\mingw64\bin` = g++ 15.2.0 + CMake 4.3.1 | `build.ps1` pins the **Strawberry** pair (the one every smoke test above ran with). Unpinned builds silently pick whichever is first in PATH. |
 
 ### 0.1 Toolchain audit — actually executed, not assumed
 
@@ -95,10 +97,15 @@ Swing EDT (Java)                         C++ process (same JVM)
 ### 2.2 Signal chain (v1)
 
 ```
-per voice: osc(saw, +square mix) → VCA(ADSR) ┐
-                                             ├─ sum (16 voices) → 2-pole resonant lowpass (state variable)
+per voice: osc(saw, +sine mix) → VCA(ADSR) ┐
+                                             ├─ sum (16 voices) → RBJ biquad lowpass (Q = 0.5 + 6·resonance)
 note-on: pitch from MIDI note, velocity → VCA peak ┘                     → master gain → soft clip → out
 ```
+
+- **Filter is an RBJ biquad, not the planned Chamberlin SVF.** The SVF went unstable (NaN) past
+  ~8 kHz at Q > 1 — found by `engine_tests`, not by ear.
+- Release is scaled to ~5 time constants, so `release = 0.25 s` means *silent* after 0.25 s rather
+  than "1.8 % still ringing".
 
 - Naive phase-accumulator oscillators with `std::sin` for v1 (16 voices × 2 osc × 48 kHz is
   trivially affordable on desktop). Saw/square from naive `sign()`/`phase<T` alias badly —
@@ -140,17 +147,21 @@ Java side — `synth.Engine`:
 ```java
 public final class Engine {
     static { System.loadLibrary("synthjni"); }   // build.ps1 sets -Djava.library.path
+    public static final int CUTOFF=0, RESONANCE=1, ATTACK=2, DECAY=3, SUSTAIN=4, RELEASE=5, OSC_MIX=6, MASTER=7;
     public static native String probeDevices();  // device list, for M0 + device picker
-    // deviceId is an RtAudio 6 device ID from getDeviceIds() (e.g. 132), NOT a 0-based index
-    public static native boolean start(int deviceId, int sampleRate, int bufferFrames);
+    public static int defaultOutputDeviceId();   // pure Java, parses probeDevices()
+
+    // Methods returning String: null = success, non-null = error text. No exceptions across JNI.
+    public static native String start(int deviceId, int sampleRate, int bufferFrames);
     public static native void stop();
-    public static native void noteOn(int channel, int note, int velocity);
-    public static native void noteOff(int channel, int note);
-    public static native void setParam(int paramId, float value);   // enum: CUTOFF, RESO, ADSR_A/D/S/R, OSC_MIX, MASTER
+    public static native void noteOn(int note, int velocity);   // MIDI channel is filtered in Java
+    public static native void noteOff(int note);
+    public static native void setParam(int paramId, float value);
     public static native float getParam(int paramId);
-    public static native int getScope(float[] out);                 // last N output frames, copied on Java thread
-    public static native boolean renderWav(String path, double seconds); // offline bounce, same DSP
-    public static native long getUnderrunCount();                   // glitch counter, for tests
+    public static native int getScope(float[] out);              // last out.length frames
+    public static native String renderWav(String path, double seconds, int[] notes, int[] vels);
+    public static native long underrunCount();
+    public static native int activeVoices();
 }
 ```
 
@@ -160,6 +171,10 @@ revisit only if startup cost ever matters).
 
 Notes:
 - `renderWav`/`probeDevices` take `String` — convert once per call, never per sample block.
+- `renderWav` takes the notes to bounce from Java. Reading held notes out of the live `Synth`
+  would race the callback thread; Java is the source of truth, so the offline path is race-free
+  by construction.
+- Errors return a `String` (null = ok) instead of letting C++ exceptions cross the boundary.
 - `getScope` uses `GetFloatArrayElements` from the Swing thread: safe, and it is the only
   Java→C++ data flow that reads engine state.
 
@@ -220,8 +235,8 @@ Test entry: `.\build.ps1 -Target test` → runs `ctest` + `EngineSmokeTest`.
 
 | M | Deliverable | Acceptance check |
 |---|---|---|
-| **M0** | `git init`, vendored RtAudio, CMake builds `synthjni.dll`, Java loads it | `Engine.probeDevices()` prints ≥1 WASAPI device from JVM. Proves toolchain + FindJNI + ABI + library path in one shot. |
-| **M1** | Engine: WASAPI stream, note-on/off, 16-voice poly, sine/saw voice | `engine_tests` renders 1 s offline: RMS > 0, no NaN, `getUnderrunCount() == 0` after 5 s live. |
+| **M0** ✅ | `git init`, vendored RtAudio, CMake builds `synthjni.dll`, Java loads it | **Passed 2026-10-15:** `probeDevices()` printed `rtaudio 6.0.1 api=7`, 9 WASAPI devices, default out = `Speakers (Realtek)` id=132. |
+| **M1** ✅ | Engine: WASAPI stream, note-on/off, 16-voice poly, sine/saw voice | **Passed 2026-10-15:** `ctest` 100% (no NaN, audible 1 s render, release silent, 20 notes → ≤16 voices, cutoff reaches the filter, WAV header parses); live run on device 132 @48 k/512 → `underruns=0`, `activeVoices=0` after release; `build/out.wav` = 2.000 s stereo 16-bit, peak 12262/32767. |
 | **M2** | Swing keyboard (mouse click) + computer-key map (`awsedftgyhujk` = one octave) | Click and keys both sound; note-off on key release; no stuck notes after window focus loss. |
 | **M3** | Params live: ADSR, cutoff, resonance, osc mix, master gain | Dragging a knob while a note sustains changes sound with no click; params read back correctly. |
 | **M4a** | MIDI-in adapter: one `Receiver` → `Engine.noteOn/Off`, plus a **built-in MIDI-file source** (`Sequencer.getTransmitter()`) | No hardware needed. A `.mid` file drives the engine; note-on/off pairs balanced, velocity respected, channel filtering correct. Unit-testable with synthetic `ShortMessage`s. |
@@ -270,22 +285,25 @@ input device exists, which is exactly this machine's current state.
 | **R7** | Naive oscillators alias (harsh saw/square) | Explicitly deferred to M7; not treated as a v1 bug. |
 | **R8** | WASAPI shared mode ≠ ASIO latency | Accept ~10–30 ms in v1; ASIO backend is a later `RtAudio` define, not a rewrite. |
 | **R9** | Swing EDT blocked by native call | All native setters are O(1) queue writes; `renderWav` runs off-EDT (`SwingWorker`). |
+| **R11** | Resonant-filter instability: the planned Chamberlin SVF produced NaN near 18 kHz / Q 1.2 | Swapped to an RBJ biquad (coefficients set per block). `engine_tests` asserts finiteness at max cutoff + max resonance. |
+| **R12** | Stuck voices on focus loss / panic — not yet handled | M2 must call `noteOff` on focus loss and expose an all-notes-off; `activeVoices()` is already exported to prove it. |
 
 ---
 
-## 8. Open questions (answer before M1)
+## 8. Decisions taken (were open questions — user delegated, 2026-10-15)
 
-1. **Effects in v1?** Plan has none (clean synth → filter → gain). A stereo delay is ~40 lines and
-   makes demos sound better, but it widens the DSP surface. Include, or hold for M7?
-2. **Mono or stereo output?** Plan assumes stereo out with mono voices summed to both buses.
-   True per-voice stereo panning is extra; wanted in v1?
-3. **MIDI source without hardware** — decided, see §6.1. M4a (MIDI-file source) is in v1; M4b
-   (real/virtual MIDI device) is optional and needs either a controller or two installs.
-4. **Who produces note events?** EDT (on-screen keys) and the MIDI receiver thread are two
-   producers. Cheapest fix: one Java-side `synchronized` enqueue wrapper. Alternative: a real
-   MPMC queue in C++. Prefer the Java wrapper (less code) — confirm.
-5. **Licence + repo visibility?** RtAudio is MIT, so MIT for this repo is safe. Confirm before
-   `git init` so the LICENSE lands in the first commit.
+1. **Effects in v1: none.** Clean chain (voices → filter → gain). A stereo delay is ~40 lines and
+   makes demos sound better, but it widens the DSP surface before M1 is even proven. Held to M7.
+2. **Stereo out, mono voices summed to both buses.** No per-voice panning in v1.
+3. **MIDI source without hardware** — see §6.1. M4a (MIDI-file source) is in v1; M4b (real or
+   virtual MIDI device) is optional. **Tier C installs (VMPK + loopMIDI) skipped for now** — they
+   add a kernel driver and a Windows re-discovery bug to test a code path Tier A covers for free.
+4. **Note-event producers: one Java-side `synchronized` enqueue wrapper.** EDT and the MIDI
+   receiver both call it; C++ keeps a single-producer ring. Chosen over an MPMC queue because it
+   is less code and the queue stays RT-trivial.
+5. **Licence: MIT** (RtAudio is MIT). `LICENSE` landed in the first commit.
+6. **Repo is PUBLIC** (`git ls-remote` succeeds anonymously). Not pushed yet — pushing publishes
+   the code, so that stays an explicit user action.
 
 ---
 
