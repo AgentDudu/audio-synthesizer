@@ -3,8 +3,8 @@
 Java (Swing) UI ⇄ JNI ⇄ C++ audio engine (RtAudio). Windows-first, designed so Linux/macOS
 later is a CMake flag change, not a rewrite.
 
-Status: **M0 + M1 done** (M0 `5eb7d3c`) — engine plays through WASAPI with 0 underruns, offline
-WAV bounce verified. Next: M2 (Swing keyboard).
+Status: **full-keyboard UI playable** — the whole 88-key piano (A0-C8) is on screen, scales with
+the window, and drives the engine. M0 `5eb7d3c`, M1 `b08ee54`. Next: knobs + scope (M3).
 
 ---
 
@@ -133,9 +133,9 @@ audio-synthesizer/
       engine_tests.cpp           # assert-based, no framework, no audio device needed
   java/src/main/java/synth/
     App.java            Engine.java        # Engine = all `native` declarations + loadLibrary
-    KeyboardPanel.java  KnobPanel.java  ScopePanel.java  MidiIn.java
-  java/src/test/java/synth/
-    EngineSmokeTest.java         # headless: load DLL, render, assert non-silent
+    KeyboardPanel.java                     # done: full 88-key piano, mouse + computer keys
+    UiSelfTest.java                        # done: headless UI check + keyboard PNG render
+    KnobPanel.java  ScopePanel.java  MidiIn.java          # M3 / M4
 ```
 
 ---
@@ -227,7 +227,8 @@ cmake --build build/native
 java -Djava.library.path=build/native -cp build/classes synth.App
 ```
 
-Test entry: `.\build.ps1 -Target test` → runs `ctest` + `EngineSmokeTest`.
+Targets: `-Target probe` (device report) | `smoke` (headless engine check + WAV bounce) |
+`run` (keyboard window) | `test` (`ctest` for `engine_tests` + `synth.UiSelfTest`).
 
 ---
 
@@ -302,13 +303,69 @@ input device exists, which is exactly this machine's current state.
    receiver both call it; C++ keeps a single-producer ring. Chosen over an MPMC queue because it
    is less code and the queue stays RT-trivial.
 5. **Licence: MIT** (RtAudio is MIT). `LICENSE` landed in the first commit.
-6. **Repo is PUBLIC** (`git ls-remote` succeeds anonymously). Not pushed yet — pushing publishes
-   the code, so that stays an explicit user action.
+6. **Repo is PUBLIC** (`git ls-remote` succeeds anonymously). `main` and `develop` are on origin;
+   feature branches go through PRs.
+7. **Computer-key map** is the tracker layout — `a w s e d f t g y h u j k o l p ;` — position in
+   that string *is* the semitone above C4. One string, no table to keep in sync. Left/right arrows
+   shift that 17-semitone window (clamped so it never leaves the piano), Esc kills all notes.
+   The whole keyboard is always visible: 52 white keys, 936 px preferred width, no scrolling, and a
+   blue bar under the keys shows where the computer-key window currently sits.
+8. **Focus loss sends note-off for every held note** (risk R12). Held notes live in one Java-side
+   `LinkedHashSet`, which also turns key auto-repeat into a no-op instead of a retrigger.
+9. **UI is tested headlessly** (`synth.UiSelfTest`): key map, pixel→note hit-testing, mouse drag,
+   focus-loss clear, then the engine's `activeVoices()`. It also walks every white and black key and
+   asserts all 88 notes A0-C8 are reachable by click. AWT swallows synthetic `FocusEvent`s, so
+   the test calls the registered `FocusListener` directly. Its `png` mode renders the keyboard to
+   `build/keyboard.png`; geometry was checked by reading pixel runs, not by eyeballing.
 
 ---
+
+10. **Keyboard geometry is a function of the component size**, not constants: key width, black-key
+    width/height, label size and the marker bar all come from `getWidth()`/`getHeight()`, and
+    painting and hit-testing call the same helpers — so resizing the window cannot desync what you
+    see from what you click. Minimum size 320x60. Consequence worth knowing: a black key is centred
+    exactly on the boundary between two white keys, so the pixel under its left half is the lower
+    white key and under its right half is the upper one.
 
 ## 9. Explicitly out of scope for v1
 
 Piano roll / timeline editing, plugin formats (VST/AU), preset library UI, sample playback,
 FM/wavetable synthesis, Linux/macOS CI, JUCE migration, Gradle/Maven packaging, ASIO,
 reverb, automation lanes, controller mapping beyond MIDI notes.
+
+---
+
+## 10. Git workflow (gitflow + Conventional Commits)
+
+Agreed 2026-10-15. Remote: `https://github.com/AgentDudu/audio-synthesizer.git` (public).
+
+| Branch | Role |
+|---|---|
+| `main` | Releases only. Every merge in gets a tag (`v0.1.0`). |
+| `develop` | Integration branch. All day-to-day work lands here. |
+| `feature/<milestone>-<slug>` | One milestone = one branch, cut from `develop` (e.g. `feature/m2-swing-keyboard`). |
+| `release/x.y.z` | Cut from `develop` when a milestone set is shippable; fix-only changes, then merge to `main` + tag, then back-merge `main` → `develop`. |
+| `hotfix/x.y.z` | Emergency fix from `main`; merge to both `main` and `develop`. |
+
+Rules:
+
+- Feature → `develop` with `git merge --no-ff feature/...` so the branch stays visible in history.
+- Rebase only on your own unpushed feature branch. Never rebase `main` or `develop`.
+- Commits follow [Conventional Commits](https://www.conventionalcommits.org):
+  `type(scope): subject` — imperative mood, ≤72 chars, body explains *why*.
+  Types in use: `feat`, `fix`, `docs`, `test`, `refactor`, `perf`, `chore`, `build`.
+  Scope is the area: `engine`, `dsp`, `jni`, `ui`, `midi`, `build`, `docs`.
+  Breaking changes: `feat(jni)!: ...` plus a `BREAKING CHANGE:` footer.
+- Infra/docs-only commits may go straight to `develop`; anything that changes behaviour goes
+  through a feature branch.
+
+M2 example:
+
+```bash
+git switch -c feature/m2-swing-keyboard develop
+# ... commit as you go: feat(ui): add on-screen keyboard with mouse input
+git switch develop && git merge --no-ff feature/m2-swing-keyboard && git push
+```
+
+Current state: `main` and `develop` both at `b08ee54` (M0 `5eb7d3c` + M1 `b08ee54`, pushed
+2026-10-15). M0/M1 predate the branch model and stay as they are — no history rewrite.
