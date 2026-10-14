@@ -312,3 +312,40 @@ input device exists, which is exactly this machine's current state.
 Piano roll / timeline editing, plugin formats (VST/AU), preset library UI, sample playback,
 FM/wavetable synthesis, Linux/macOS CI, JUCE migration, Gradle/Maven packaging, ASIO,
 reverb, automation lanes, controller mapping beyond MIDI notes.
+
+---
+
+## 10. Git workflow (gitflow + Conventional Commits)
+
+Agreed 2026-10-15. Remote: `https://github.com/AgentDudu/audio-synthesizer.git` (public).
+
+| Branch | Role |
+|---|---|
+| `main` | Releases only. Every merge in gets a tag (`v0.1.0`). |
+| `develop` | Integration branch. All day-to-day work lands here. |
+| `feature/<milestone>-<slug>` | One milestone = one branch, cut from `develop` (e.g. `feature/m2-swing-keyboard`). |
+| `release/x.y.z` | Cut from `develop` when a milestone set is shippable; fix-only changes, then merge to `main` + tag, then back-merge `main` → `develop`. |
+| `hotfix/x.y.z` | Emergency fix from `main`; merge to both `main` and `develop`. |
+
+Rules:
+
+- Feature → `develop` with `git merge --no-ff feature/...` so the branch stays visible in history.
+- Rebase only on your own unpushed feature branch. Never rebase `main` or `develop`.
+- Commits follow [Conventional Commits](https://www.conventionalcommits.org):
+  `type(scope): subject` — imperative mood, ≤72 chars, body explains *why*.
+  Types in use: `feat`, `fix`, `docs`, `test`, `refactor`, `perf`, `chore`, `build`.
+  Scope is the area: `engine`, `dsp`, `jni`, `ui`, `midi`, `build`, `docs`.
+  Breaking changes: `feat(jni)!: ...` plus a `BREAKING CHANGE:` footer.
+- Infra/docs-only commits may go straight to `develop`; anything that changes behaviour goes
+  through a feature branch.
+
+M2 example:
+
+```bash
+git switch -c feature/m2-swing-keyboard develop
+# ... commit as you go: feat(ui): add on-screen keyboard with mouse input
+git switch develop && git merge --no-ff feature/m2-swing-keyboard && git push
+```
+
+Current state: `main` and `develop` both at `b08ee54` (M0 `5eb7d3c` + M1 `b08ee54`, pushed
+2026-10-15). M0/M1 predate the branch model and stay as they are — no history rewrite.
