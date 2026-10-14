@@ -15,6 +15,8 @@ public final class UiSelfTest {
   private static final int BIG_W = 936, BIG_H = 150;
   private static final int SMALL_W = 420, SMALL_H = 80;
   private static final int TINY_W = KeyboardPanel.MIN_WIDTH, TINY_H = KeyboardPanel.MIN_HEIGHT;
+  // synth.cpp defaults; the knob section puts the engine back here before the drain test.
+  private static final float[] DEFAULTS = {8000f, 0.2f, 0.003f, 0.2f, 0.7f, 0.25f, 0f, 0.2f};
 
   private static int failures;
 
@@ -161,7 +163,55 @@ public final class UiSelfTest {
     keys.keyUp('a');
     keys.setOctaveShift(0);
 
+    System.out.println("knobs");
+    // Engine is still at its C++ defaults here, which is what the sliders must start from.
+    final KnobPanel[] knobBox = new KnobPanel[1];
+    SwingUtilities.invokeAndWait(() -> knobBox[0] = new KnobPanel());
+    KnobPanel knobs = knobBox[0];
+    for (KnobPanel.Spec spec : KnobPanel.SPECS) {
+      check(KnobPanel.toEngine(spec, 0) == spec.min()
+              && Math.abs(KnobPanel.toEngine(spec, KnobPanel.TICKS) - spec.max()) < spec.max() * 0.01,
+          spec.label() + " slider spans " + spec.min() + ".." + spec.max());
+      float value = KnobPanel.toEngine(spec, 640);
+      check(Math.abs(KnobPanel.toTick(spec, value) - 640) <= 1, spec.label() + " slider round-trips");
+      check(knobs.tickOf(spec.id()) == KnobPanel.toTick(spec, Engine.getParam(spec.id())),
+          spec.label() + " slider starts at the engine value " + Engine.getParam(spec.id()));
+    }
+    for (KnobPanel.Spec spec : KnobPanel.SPECS) {
+      knobs.setTick(spec.id(), 700);
+      float expected = KnobPanel.toEngine(spec, 700);
+      check(Math.abs(Engine.getParam(spec.id()) - expected) <= Math.abs(expected) * 1e-3 + 1e-6,
+          spec.label() + " reaches the engine: set " + expected + ", got " + Engine.getParam(spec.id()));
+    }
+    // 'k' is still held from the mouse section; clear it and let older releases finish so the
+    // voice count below means exactly the two notes pressed here.
+    keys.keyUp('k');
+    Thread.sleep(600);
+    keys.keyDown('a');
+    keys.keyDown('e');
+    for (int tick = 0; tick <= KnobPanel.TICKS; tick += 40) {
+      knobs.setTick(Engine.CUTOFF, tick);
+      knobs.setTick(Engine.MASTER, tick);
+    }
+    Thread.sleep(150);
+    check(Engine.activeVoices() == 2, "notes survive a full cutoff+level sweep, got " + Engine.activeVoices() + " held " + keys.heldNotes());
+    check(Engine.underrunCount() == 0, "no underruns during the sweep, got " + Engine.underrunCount());
+    keys.keyUp('a');
+    keys.keyUp('e');
+    // These two notes captured the long release set above, so give them time to finish.
+    Thread.sleep(2200);
+    check(Engine.activeVoices() == 0, "long releases drain, got " + Engine.activeVoices());
+    for (int id = 0; id < DEFAULTS.length; ++id) {
+      for (KnobPanel.Spec spec : KnobPanel.SPECS) {
+        if (spec.id() == id) knobs.setTick(id, KnobPanel.toTick(spec, DEFAULTS[id]));
+      }
+      check(Math.abs(Engine.getParam(id) - DEFAULTS[id]) <= Math.abs(DEFAULTS[id]) * 0.02 + 1e-4,
+          "param " + id + " restored for the drain test");
+    }
+
     System.out.println("focus loss");
+    keys.keyDown('a');
+    check(keys.heldCount() == 1, "one note held before focus loss");
     // AWT swallows synthetic FocusEvents, so call the registered listener the way the toolkit would.
     SwingUtilities.invokeAndWait(() -> {
       for (java.awt.event.FocusListener l : keys.getFocusListeners()) {
