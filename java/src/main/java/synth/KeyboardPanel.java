@@ -1,7 +1,9 @@
 package synth;
 
+import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Dimension;
+import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
@@ -16,20 +18,28 @@ import java.util.Set;
 import javax.swing.JComponent;
 
 /**
- * Two-octave piano. Mouse clicks, drags, and the computer keyboard all drive the same
- * noteOn/noteOff path. Left/right arrows shift octave, Esc kills every held note.
+ * Full 88-key piano (A0-C8). Mouse clicks, drags, and the computer keyboard all drive the same
+ * noteOn/noteOff path. The whole keyboard is always on screen and clickable; the computer keys
+ * cover one 17-semitone window of it, moved with left/right arrows. Esc kills every held note.
  */
 final class KeyboardPanel extends JComponent {
-  static final int WHITE_KEYS = 14;  // two octaves
-  static final int WHITE_WIDTH = 34;
-  static final int BLACK_WIDTH = 22;
+  static final int LOWEST_NOTE = 21;   // A0
+  static final int HIGHEST_NOTE = 108; // C8
+  static final int WHITE_WIDTH = 18;
+  static final int BLACK_WIDTH = 12;
   static final int KEY_HEIGHT = 150;
   static final int BLACK_HEIGHT = 92;
-  static final int BASE_NOTE = 60;  // C4
+  static final int BASE_NOTE = 60;  // C4, where the computer-key row starts
 
-  // Tracker-style computer key map: position in this string is the semitone above the base note.
+  // Tracker-style computer key map: position in this string is the semitone above BASE_NOTE.
   private static final String KEY_ROWS = "awsedftgyhujkolp;";
   private static final int[] WHITE_SEMITONES = {0, 2, 4, 5, 7, 9, 11};
+
+  /** Every white-key note of the piano, low to high. Built once; the layout is derived from it. */
+  private static final int[] WHITE_NOTES = buildWhiteNotes();
+
+  static final int MIN_OCTAVE_SHIFT = -3;  // keeps the whole computer-key row inside the piano
+  static final int MAX_OCTAVE_SHIFT = 2;
 
   private final Set<Integer> held = new LinkedHashSet<>();
   private int mouseNote = -1;
@@ -37,12 +47,12 @@ final class KeyboardPanel extends JComponent {
 
   KeyboardPanel() {
     setFocusable(true);
-    setPreferredSize(new Dimension(WHITE_KEYS * WHITE_WIDTH, KEY_HEIGHT));
+    setPreferredSize(new Dimension(WHITE_NOTES.length * WHITE_WIDTH, KEY_HEIGHT));
 
     MouseAdapter mouse = new MouseAdapter() {
       @Override
       public void mousePressed(MouseEvent e) {
-        setMouseNote(noteAt(e.getX(), e.getY(), octaveShift));
+        setMouseNote(noteAt(e.getX(), e.getY()));
       }
 
       @Override
@@ -52,7 +62,7 @@ final class KeyboardPanel extends JComponent {
 
       @Override
       public void mouseDragged(MouseEvent e) {
-        setMouseNote(noteAt(e.getX(), e.getY(), octaveShift));
+        setMouseNote(noteAt(e.getX(), e.getY()));
       }
     };
     addMouseListener(mouse);
@@ -63,12 +73,10 @@ final class KeyboardPanel extends JComponent {
       public void keyPressed(KeyEvent e) {
         switch (e.getKeyCode()) {
           case KeyEvent.VK_LEFT:
-            octaveShift = Math.max(octaveShift - 1, -3);
-            repaint();
+            setOctaveShift(octaveShift - 1);
             return;
           case KeyEvent.VK_RIGHT:
-            octaveShift = Math.min(octaveShift + 1, 3);
-            repaint();
+            setOctaveShift(octaveShift + 1);
             return;
           case KeyEvent.VK_ESCAPE:
             allNotesOff();
@@ -106,7 +114,7 @@ final class KeyboardPanel extends JComponent {
   }
 
   void setOctaveShift(int shift) {
-    octaveShift = Math.max(Math.min(shift, 3), -3);
+    octaveShift = Math.max(Math.min(shift, MAX_OCTAVE_SHIFT), MIN_OCTAVE_SHIFT);
     repaint();
   }
 
@@ -144,35 +152,69 @@ final class KeyboardPanel extends JComponent {
     repaint();
   }
 
-  static int keyNote(char keyChar, int octaveShift) {
-    int semitone = KEY_ROWS.indexOf(Character.toLowerCase(keyChar));
-    return semitone < 0 ? -1 : BASE_NOTE + 12 * octaveShift + semitone;
+  private static boolean isWhite(int note) {
+    for (int semitone : WHITE_SEMITONES) {
+      if (semitone == note % 12) return true;
+    }
+    return false;
   }
 
-  static int whiteNote(int whiteIndex, int octaveShift) {
-    return BASE_NOTE + 12 * octaveShift + 12 * (whiteIndex / 7) + WHITE_SEMITONES[whiteIndex % 7];
+  private static int[] buildWhiteNotes() {
+    int count = 0;
+    for (int note = LOWEST_NOTE; note <= HIGHEST_NOTE; ++note) {
+      if (isWhite(note)) ++count;
+    }
+    int[] notes = new int[count];
+    int i = 0;
+    for (int note = LOWEST_NOTE; note <= HIGHEST_NOTE; ++note) {
+      if (isWhite(note)) notes[i++] = note;
+    }
+    return notes;
+  }
+
+  static int whiteCount() {
+    return WHITE_NOTES.length;
+  }
+
+  static int whiteNote(int whiteIndex) {
+    return WHITE_NOTES[whiteIndex];
   }
 
   static int blackLeft(int whiteIndex) {
     return (whiteIndex + 1) * WHITE_WIDTH - BLACK_WIDTH / 2;
   }
 
-  static boolean hasBlack(int whiteIndex, int octaveShift) {
-    return whiteIndex + 1 < WHITE_KEYS
-        && whiteNote(whiteIndex + 1, octaveShift) - whiteNote(whiteIndex, octaveShift) == 2;
+  static boolean hasBlack(int whiteIndex) {
+    return whiteIndex + 1 < WHITE_NOTES.length
+        && WHITE_NOTES[whiteIndex + 1] - WHITE_NOTES[whiteIndex] == 2;
+  }
+
+  /** Left pixel edge of the white key holding `note`. */
+  static int leftOfNote(int note) {
+    for (int w = 0; w < WHITE_NOTES.length; ++w) {
+      if (WHITE_NOTES[w] <= note && (w + 1 == WHITE_NOTES.length || WHITE_NOTES[w + 1] > note)) {
+        return w * WHITE_WIDTH;
+      }
+    }
+    return 0;
+  }
+
+  static int keyNote(char keyChar, int octaveShift) {
+    int semitone = KEY_ROWS.indexOf(Character.toLowerCase(keyChar));
+    return semitone < 0 ? -1 : BASE_NOTE + 12 * octaveShift + semitone;
   }
 
   /** Note under a pixel, or -1. Black keys win over the white key behind them. */
-  static int noteAt(int x, int y, int octaveShift) {
-    if (x < 0 || x >= WHITE_KEYS * WHITE_WIDTH || y < 0 || y >= KEY_HEIGHT) return -1;
+  static int noteAt(int x, int y) {
+    if (x < 0 || x >= WHITE_NOTES.length * WHITE_WIDTH || y < 0 || y >= KEY_HEIGHT) return -1;
     if (y < BLACK_HEIGHT) {
-      for (int w = 0; w < WHITE_KEYS; ++w) {
-        if (hasBlack(w, octaveShift) && x >= blackLeft(w) && x < blackLeft(w) + BLACK_WIDTH) {
-          return whiteNote(w, octaveShift) + 1;
+      for (int w = 0; w < WHITE_NOTES.length; ++w) {
+        if (hasBlack(w) && x >= blackLeft(w) && x < blackLeft(w) + BLACK_WIDTH) {
+          return WHITE_NOTES[w] + 1;
         }
       }
     }
-    return whiteNote(x / WHITE_WIDTH, octaveShift);
+    return WHITE_NOTES[x / WHITE_WIDTH];
   }
 
   @Override
@@ -182,23 +224,31 @@ final class KeyboardPanel extends JComponent {
     g.setColor(getBackground());
     g.fillRect(0, 0, getWidth(), getHeight());
 
-    for (int w = 0; w < WHITE_KEYS; ++w) {
-      int note = whiteNote(w, octaveShift);
+    for (int w = 0; w < WHITE_NOTES.length; ++w) {
+      int note = WHITE_NOTES[w];
       int x = w * WHITE_WIDTH;
       g.setColor(held.contains(note) ? new Color(150, 200, 255) : Color.WHITE);
       g.fillRect(x, 0, WHITE_WIDTH - 1, KEY_HEIGHT);
       g.setColor(new Color(90, 90, 90));
       g.drawRect(x, 0, WHITE_WIDTH - 1, KEY_HEIGHT - 1);
       if (note % 12 == 0) {  // mark the Cs so the keyboard is readable
-        g.drawString("C" + (note / 12 - 1), x + 12, KEY_HEIGHT - 12);
+        g.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 10));
+        g.drawString("C" + (note / 12 - 1), x + 2, KEY_HEIGHT - 16);
       }
     }
 
-    for (int w = 0; w < WHITE_KEYS; ++w) {
-      if (!hasBlack(w, octaveShift)) continue;
-      int note = whiteNote(w, octaveShift) + 1;
+    for (int w = 0; w < WHITE_NOTES.length; ++w) {
+      if (!hasBlack(w)) continue;
+      int note = WHITE_NOTES[w] + 1;
       g.setColor(held.contains(note) ? new Color(40, 100, 190) : new Color(25, 25, 25));
       g.fillRect(blackLeft(w), 0, BLACK_WIDTH, BLACK_HEIGHT);
     }
+
+    // Show which slice of the piano the computer keys currently play.
+    int base = BASE_NOTE + 12 * octaveShift;
+    g.setColor(new Color(30, 130, 230));
+    g.setStroke(new BasicStroke(3f));
+    g.drawLine(leftOfNote(base), KEY_HEIGHT - 3,
+        leftOfNote(base + KEY_ROWS.length() - 1) + WHITE_WIDTH, KEY_HEIGHT - 3);
   }
 }

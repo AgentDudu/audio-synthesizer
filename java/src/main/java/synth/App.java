@@ -43,7 +43,8 @@ public final class App {
       JFrame frame = new JFrame("Audio Synthesizer");
       KeyboardPanel keys = new KeyboardPanel();
       JLabel status = new JLabel("device " + device + " @ 48000 Hz / 512 frames"
-          + "   keys: a w s e d f t g y h u j k   arrows: octave   esc: all notes off");
+          + "   A0-C8 on screen   computer keys: a w s e d f t g y h u j k   arrows: octave"
+          + "   esc: all notes off");
       frame.setLayout(new BorderLayout());
       frame.add(keys, BorderLayout.CENTER);
       frame.add(status, BorderLayout.SOUTH);

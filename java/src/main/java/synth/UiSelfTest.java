@@ -2,12 +2,13 @@ package synth;
 
 import java.awt.event.FocusEvent;
 import java.awt.event.MouseEvent;
+import java.util.TreeSet;
 import javax.swing.SwingUtilities;
 
 /**
- * Headless check of the keyboard layer: computer-key map, pixel-to-note geometry, mouse drag
- * behaviour, focus-loss note-off, and the engine actually holding the right number of voices.
- * Run with: java -cp build/classes synth.UiSelfTest
+ * Headless check of the keyboard layer: computer-key map, pixel-to-note geometry over the whole
+ * 88-key range, mouse drag behaviour, focus-loss note-off, and the engine actually holding the
+ * right number of voices. Run with: java -cp build/classes synth.UiSelfTest [png]
  */
 public final class UiSelfTest {
   private static int failures;
@@ -17,11 +18,18 @@ public final class UiSelfTest {
     if (!ok) ++failures;
   }
 
+  private static int indexOf(int note) {
+    for (int w = 0; w < KeyboardPanel.whiteCount(); ++w) {
+      if (KeyboardPanel.whiteNote(w) == note) return w;
+    }
+    return -1;
+  }
+
   public static void main(String[] args) throws Exception {
     if (args.length > 0 && args[0].equals("png")) {
       SwingUtilities.invokeAndWait(() -> {
         KeyboardPanel p = new KeyboardPanel();
-        int w = KeyboardPanel.WHITE_KEYS * KeyboardPanel.WHITE_WIDTH;
+        int w = KeyboardPanel.whiteCount() * KeyboardPanel.WHITE_WIDTH;
         p.setSize(w, KeyboardPanel.KEY_HEIGHT);
         java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(
             w, KeyboardPanel.KEY_HEIGHT, java.awt.image.BufferedImage.TYPE_INT_RGB);
@@ -42,19 +50,42 @@ public final class UiSelfTest {
     check(KeyboardPanel.keyNote('w', 0) == 61, "'w' -> C#4 (61)");
     check(KeyboardPanel.keyNote('k', 0) == 72, "'k' -> C5 (72)");
     check(KeyboardPanel.keyNote(';', 0) == 76, "';' -> E5 (76)");
-    check(KeyboardPanel.keyNote('a', 2) == 84, "'a' two octaves up -> C6 (84)");
     check(KeyboardPanel.keyNote('q', 0) == -1, "'q' unmapped");
+    check(KeyboardPanel.keyNote('a', 2) == 84 && KeyboardPanel.keyNote(';', 2) <= KeyboardPanel.HIGHEST_NOTE,
+        "highest octave shift stays inside the piano");
+    check(KeyboardPanel.keyNote('a', KeyboardPanel.MIN_OCTAVE_SHIFT) >= KeyboardPanel.LOWEST_NOTE
+        && KeyboardPanel.keyNote(';', KeyboardPanel.MAX_OCTAVE_SHIFT) <= KeyboardPanel.HIGHEST_NOTE,
+        "the extreme shifts stay inside the piano");
+
+    System.out.println("full 88-key range");
+    check(KeyboardPanel.whiteCount() == 52, "52 white keys, got " + KeyboardPanel.whiteCount());
+    check(KeyboardPanel.whiteNote(0) == 21, "lowest white key = A0 (21)");
+    check(KeyboardPanel.whiteNote(KeyboardPanel.whiteCount() - 1) == 108, "highest white key = C8 (108)");
+    TreeSet<Integer> reachable = new TreeSet<>();
+    for (int w = 0; w < KeyboardPanel.whiteCount(); ++w) {
+      reachable.add(KeyboardPanel.noteAt(w * KeyboardPanel.WHITE_WIDTH + KeyboardPanel.WHITE_WIDTH / 2,
+          KeyboardPanel.KEY_HEIGHT - 10));
+      if (KeyboardPanel.hasBlack(w)) {
+        reachable.add(KeyboardPanel.noteAt(KeyboardPanel.blackLeft(w) + KeyboardPanel.BLACK_WIDTH / 2, 10));
+      }
+    }
+    check(reachable.size() == 88 && reachable.first() == 21 && reachable.last() == 108,
+        "every note A0-C8 is clickable, got " + reachable.size() + " (" + reachable.first()
+            + ".." + reachable.last() + ")");
 
     System.out.println("pixel -> note");
-    check(KeyboardPanel.noteAt(2, 120, 0) == 60, "left edge white key -> C4");
-    check(KeyboardPanel.noteAt(KeyboardPanel.blackLeft(0) + 5, 10, 0) == 61, "black key region -> C#4");
-    check(KeyboardPanel.noteAt(KeyboardPanel.blackLeft(0) + 5, 120, 0) == 60, "below black key -> white C4");
-    check(KeyboardPanel.noteAt(3 * KeyboardPanel.WHITE_WIDTH + 2, 120, 0) == 65, "4th white key -> F4");
-    check(KeyboardPanel.noteAt(-1, 0, 0) == -1, "x < 0 -> no note");
-    check(KeyboardPanel.noteAt(KeyboardPanel.WHITE_KEYS * KeyboardPanel.WHITE_WIDTH, 0, 0) == -1,
+    int c4 = indexOf(60);
+    check(c4 > 0, "C4 found in the white-key layout");
+    check(KeyboardPanel.noteAt(c4 * KeyboardPanel.WHITE_WIDTH + 2, 120) == 60, "white key -> C4");
+    check(KeyboardPanel.hasBlack(c4)
+        && KeyboardPanel.noteAt(KeyboardPanel.blackLeft(c4) + 5, 10) == 61, "black key above C4 -> C#4");
+    check(KeyboardPanel.noteAt(KeyboardPanel.blackLeft(c4) + 5, 120) == 60, "below that black key -> white C4");
+    check(!KeyboardPanel.hasBlack(indexOf(64)), "no black key between E and F");
+    check(KeyboardPanel.hasBlack(indexOf(67)), "black key between G and A");
+    check(KeyboardPanel.noteAt(-1, 0) == -1, "x < 0 -> no note");
+    check(KeyboardPanel.noteAt(KeyboardPanel.whiteCount() * KeyboardPanel.WHITE_WIDTH, 0) == -1,
         "x past last key -> no note");
-    check(!KeyboardPanel.hasBlack(2, 0), "no black key between E and F");
-    check(KeyboardPanel.hasBlack(0, 0), "black key between C and D");
+    check(KeyboardPanel.noteAt(0, KeyboardPanel.KEY_HEIGHT) == -1, "y below keys -> no note");
 
     String err = Engine.start(Engine.defaultOutputDeviceId(), 48000, 512);
     check(err == null, "engine start" + (err == null ? "" : ": " + err));
@@ -63,7 +94,7 @@ public final class UiSelfTest {
     final KeyboardPanel[] box = new KeyboardPanel[1];
     SwingUtilities.invokeAndWait(() -> {
       box[0] = new KeyboardPanel();
-      box[0].setSize(KeyboardPanel.WHITE_KEYS * KeyboardPanel.WHITE_WIDTH, KeyboardPanel.KEY_HEIGHT);
+      box[0].setSize(KeyboardPanel.whiteCount() * KeyboardPanel.WHITE_WIDTH, KeyboardPanel.KEY_HEIGHT);
     });
     KeyboardPanel keys = box[0];
 
@@ -80,16 +111,29 @@ public final class UiSelfTest {
     check(keys.heldCount() == 1, "keyUp releases one");
 
     System.out.println("mouse vs engine");
-    int dragX = 3 * KeyboardPanel.WHITE_WIDTH + 2;
+    int whiteX = indexOf(65) * KeyboardPanel.WHITE_WIDTH + 2;
     SwingUtilities.invokeAndWait(() -> {
       keys.dispatchEvent(new MouseEvent(keys, MouseEvent.MOUSE_PRESSED, 0, 0,
-          KeyboardPanel.blackLeft(0) + 5, 10, 1, false));
-      keys.dispatchEvent(new MouseEvent(keys, MouseEvent.MOUSE_DRAGGED, 0, 0, dragX, 120, 0, false));
+          KeyboardPanel.blackLeft(c4) + 5, 10, 1, false));
+      keys.dispatchEvent(new MouseEvent(keys, MouseEvent.MOUSE_DRAGGED, 0, 0, whiteX, 120, 0, false));
     });
     check(keys.heldCount() == 2, "drag adds a note while the key is still held");
     SwingUtilities.invokeAndWait(() -> keys.dispatchEvent(
-        new MouseEvent(keys, MouseEvent.MOUSE_RELEASED, 0, 0, dragX, 120, 1, false)));
+        new MouseEvent(keys, MouseEvent.MOUSE_RELEASED, 0, 0, whiteX, 120, 1, false)));
     check(keys.heldCount() == 1, "mouse release clears only the mouse note");
+
+    System.out.println("octave shift");
+    keys.setOctaveShift(KeyboardPanel.MAX_OCTAVE_SHIFT + 5);
+    check(keys.octaveShift() == KeyboardPanel.MAX_OCTAVE_SHIFT, "shift clamps high");
+    keys.keyDown(';');
+    check(keys.heldCount() == 2, "top shift still plays a note");
+    keys.keyUp(';');
+    keys.setOctaveShift(KeyboardPanel.MIN_OCTAVE_SHIFT - 5);
+    check(keys.octaveShift() == KeyboardPanel.MIN_OCTAVE_SHIFT, "shift clamps low");
+    keys.keyDown('a');
+    check(keys.heldCount() == 2, "bottom shift still plays a note");
+    keys.keyUp('a');
+    keys.setOctaveShift(0);
 
     System.out.println("focus loss");
     // AWT swallows synthetic FocusEvents, so call the registered listener the way the toolkit would.
