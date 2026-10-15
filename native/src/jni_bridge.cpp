@@ -28,12 +28,14 @@ extern "C" JNIEXPORT jstring JNICALL Java_synth_Engine_start(JNIEnv *env, jclass
 
 extern "C" JNIEXPORT void JNICALL Java_synth_Engine_stop(JNIEnv *, jclass) { engine().stop(); }
 
-extern "C" JNIEXPORT void JNICALL Java_synth_Engine_noteOn(JNIEnv *, jclass, jint note,
-                                                           jint velocity) {
+// Java_synth_Engine_nativeNoteOn/Off: the Java side wraps these in synchronized noteOn/noteOff so
+// the EDT and the MIDI receiver never enter the single-producer ring at the same time.
+extern "C" JNIEXPORT void JNICALL Java_synth_Engine_nativeNoteOn(JNIEnv *, jclass, jint note,
+                                                                jint velocity) {
   engine().noteOn(note, velocity);
 }
 
-extern "C" JNIEXPORT void JNICALL Java_synth_Engine_noteOff(JNIEnv *, jclass, jint note) {
+extern "C" JNIEXPORT void JNICALL Java_synth_Engine_nativeNoteOff(JNIEnv *, jclass, jint note) {
   engine().noteOff(note);
 }
 
