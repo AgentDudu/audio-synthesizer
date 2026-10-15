@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.16)
 project(synthjni CXX)
 set(CMAKE_CXX_STANDARD 17)
+# clangd reads this; build.ps1 copies it to the repo root where clangd looks for it.
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+# MinGW make writes includes to a @file.rsp, which clangd does not expand, so keep -I inline.
+set(CMAKE_CXX_USE_RESPONSE_FILE_FOR_INCLUDES OFF)
 
 find_package(JNI REQUIRED)
 
