@@ -57,6 +57,27 @@ extern "C" JNIEXPORT jint JNICALL Java_synth_Engine_getScope(JNIEnv *env, jclass
   return copied;
 }
 
+extern "C" JNIEXPORT jint JNICALL Java_synth_Engine_getVoiceLevels(JNIEnv *env, jclass,
+                                                                   jintArray jnotes,
+                                                                   jfloatArray jlevels) {
+  int notes[synth::Synth::kVoices];
+  float levels[synth::Synth::kVoices];
+  const int n = engine().voiceLevels(notes, levels);
+  const int a = env->GetArrayLength(jnotes), b = env->GetArrayLength(jlevels);
+  const int cap = a < b ? a : b;
+  if (cap > 0) {
+    jint *jn = env->GetIntArrayElements(jnotes, nullptr);
+    jfloat *jl = env->GetFloatArrayElements(jlevels, nullptr);
+    for (int i = 0; i < n && i < cap; ++i) {
+      jn[i] = notes[i];
+      jl[i] = levels[i];
+    }
+    env->ReleaseIntArrayElements(jnotes, jn, JNI_COMMIT);
+    env->ReleaseFloatArrayElements(jlevels, jl, JNI_COMMIT);
+  }
+  return n;
+}
+
 extern "C" JNIEXPORT jstring JNICALL Java_synth_Engine_renderWav(JNIEnv *env, jclass,
                                                                  jstring jpath, jdouble seconds,
                                                                  jintArray jnotes, jintArray jvels) {

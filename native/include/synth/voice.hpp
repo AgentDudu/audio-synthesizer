@@ -9,6 +9,7 @@ class Voice {
   void release() { env_.gateOff(); }
   bool active() const { return env_.active(); }
   int note() const { return note_; }
+  float level() const { return env_.level; }
   unsigned long long order() const { return order_; }
 
   // One mono sample; caller sums it into both buses (PLAN.md §8.2: mono voices, stereo out).

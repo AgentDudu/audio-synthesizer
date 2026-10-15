@@ -29,6 +29,11 @@ class Synth {
 
   int activeVoices() const;
 
+  // Audio-thread only: copies each active voice's note + envelope level into the caller's arrays
+  // (at most kVoices entries). Java reads AudioEngine's per-block atomic snapshot instead of these
+  // fields, so there is no race on plain int/float (PLAN.md §8.14).
+  int snapshotVoices(int *notes, float *levels) const;
+
  private:
   Adsr envTemplate() const;
 

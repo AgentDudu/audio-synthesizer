@@ -53,6 +53,15 @@ int AudioEngine::callback(void *out, void *, unsigned nFrames, double, RtAudioSt
     p = (p + 1) & (kScopeSize - 1);
   }
   self.scopePos_.store(p, std::memory_order_relaxed);
+
+  // Per-voice snapshot for the waterfall display: 16 slots per block, nothing on the per-sample path.
+  int vnotes[Synth::kVoices];
+  float vlevels[Synth::kVoices];
+  const int vn = self.synth_.snapshotVoices(vnotes, vlevels);
+  for (int i = 0; i < Synth::kVoices; ++i) {
+    self.voiceNote_[i].store(i < vn ? vnotes[i] : -1, std::memory_order_relaxed);
+    self.voiceLevel_[i].store(i < vn ? vlevels[i] : 0.f, std::memory_order_relaxed);
+  }
   return 0;
 }
 
@@ -99,6 +108,18 @@ int AudioEngine::copyScope(float *dst, int n) const {
   if (n > kScopeSize) n = kScopeSize;
   const unsigned p = scopePos_.load(std::memory_order_relaxed);
   for (int i = 0; i < n; ++i) dst[i] = scope_[(p - static_cast<unsigned>(n) + i + kScopeSize) & (kScopeSize - 1)];
+  return n;
+}
+
+int AudioEngine::voiceLevels(int *notes, float *levels) const {
+  int n = 0;
+  for (int i = 0; i < Synth::kVoices; ++i) {
+    const int note = voiceNote_[i].load(std::memory_order_relaxed);
+    if (note < 0) continue;
+    if (notes) notes[n] = note;
+    if (levels) levels[n] = voiceLevel_[i].load(std::memory_order_relaxed);
+    ++n;
+  }
   return n;
 }
 

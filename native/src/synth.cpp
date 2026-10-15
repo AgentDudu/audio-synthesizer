@@ -73,4 +73,15 @@ int Synth::activeVoices() const {
   return n;
 }
 
+int Synth::snapshotVoices(int *notes, float *levels) const {
+  int n = 0;
+  for (int i = 0; i < kVoices; ++i) {
+    if (!voices_[i].active()) continue;
+    if (notes) notes[n] = voices_[i].note();
+    if (levels) levels[n] = voices_[i].level();
+    ++n;
+  }
+  return n;
+}
+
 }  // namespace synth
