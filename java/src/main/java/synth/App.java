@@ -5,6 +5,7 @@ import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
+import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
 import javax.swing.WindowConstants;
 
@@ -45,9 +46,13 @@ public final class App {
       JLabel status = new JLabel("device " + device + " @ 48000 Hz / 512 frames"
           + "   A0-C8 on screen   computer keys: a w s e d f t g y h u j k   arrows: octave"
           + "   esc: all notes off");
+      KnobPanel knobs = new KnobPanel();
+      JPanel south = new JPanel(new BorderLayout());
+      south.add(knobs, BorderLayout.CENTER);
+      south.add(status, BorderLayout.SOUTH);
       frame.setLayout(new BorderLayout());
       frame.add(keys, BorderLayout.CENTER);
-      frame.add(status, BorderLayout.SOUTH);
+      frame.add(south, BorderLayout.SOUTH);
       frame.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
       frame.addWindowListener(new WindowAdapter() {
         @Override
