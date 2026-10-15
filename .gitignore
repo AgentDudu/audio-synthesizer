@@ -1,4 +1,6 @@
 build/
+# copied from build/native by build.ps1 for clangd
+/compile_commands.json
 *.class
 *.dll
 *.o

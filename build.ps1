@@ -18,6 +18,8 @@ if ($LASTEXITCODE -ne 0) { throw "javac failed" }
 & $cmake -S native -B build/native -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release `
     -DCMAKE_CXX_COMPILER="$gccDir/g++.exe" -DCMAKE_MAKE_PROGRAM="$gccDir/mingw32-make.exe"
 if ($LASTEXITCODE -ne 0) { throw "cmake configure failed" }
+# clangd only looks for compile_commands.json in the source tree (or a build/ subdir of it).
+Copy-Item build/native/compile_commands.json compile_commands.json -Force
 & $cmake --build build/native
 if ($LASTEXITCODE -ne 0) { throw "cmake build failed" }
 
