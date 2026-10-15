@@ -3,8 +3,9 @@
 Java (Swing) UI ⇄ JNI ⇄ C++ audio engine (RtAudio). Windows-first, designed so Linux/macOS
 later is a CMake flag change, not a rewrite.
 
-Status: **v0.2.0 on `main`** — 88-key piano (A0-C8) with mouse + computer keys that scales with the
-window, eight live param sliders, live scope. `main` `d87f3d6` (tag `v0.2.0`), `develop` tracks it.
+Status: **v0.3.0 on `main`** — 88-key piano (A0-C8) with mouse + computer keys that scales with the
+window, eight live param sliders, live scope, and MIDI-file input that lights the keys.
+`main` `f676390` (tag `v0.3.0`), `develop` `1c5c8fc` (same content). Paused before M6 by the user.
 Next: polish (M6 — device picker, buffer size, quit cleanup, README).
 
 ---
@@ -395,8 +396,10 @@ gh pr create --base develop --head feature/resize-keyboard   # evidence goes in 
 gh pr merge --merge --delete-branch                          # only after the user approves
 ```
 
-Current state (2026-10-15): `develop` `03ce54e`, `main` `b356b3c` (merge of `develop`, pushed).
-PRs #1 (keyboard), #2 (88 keys), #3 (resize) merged. **No tag exists yet** — `main` has content but
-the `v0.1.0` release tag was never cut, so the "every merge to `main` gets a tag" rule is currently
-broken by us, not by the plan. M0/M1 commits predate the message rules and stay as they are — no
-history rewrite on pushed branches.
+Current state (2026-10-16): `main` `f676390` (tag `v0.3.0`), `develop` `1c5c8fc` — same content,
+back-merge after each release as the model requires. Tags `v0.1.0` (`b356b3c`), `v0.2.0` (`d87f3d6`)
+and `v0.3.0` exist, so the "every merge to `main` gets a tag" rule now holds; the earlier gap was
+closed by cutting `v0.1.0` retroactively at the commit that was already on `main`. PRs #1-#8 merged.
+`release/0.2.0` and `release/0.3.0` are still on origin — deleting a remote ref is blocked by the
+agent's safety net, so the user removes them by hand. M0/M1 commits predate the message rules and
+stay as they are — no history rewrite on pushed branches.
