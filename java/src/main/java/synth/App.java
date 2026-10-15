@@ -65,8 +65,9 @@ public final class App {
         JFileChooser chooser = new JFileChooser();
         if (chooser.showOpenDialog(frame) != JFileChooser.APPROVE_OPTION) return;
         MidiIn.closeQuietly(player[0]);
+        keys.clearRemoteNotes();
         try {
-          player[0] = MidiIn.playFile(chooser.getSelectedFile().getPath(), MidiIn.ALL_CHANNELS);
+          player[0] = MidiIn.playFile(chooser.getSelectedFile().getPath(), MidiIn.ALL_CHANNELS, keys);
           status.setText("playing " + chooser.getSelectedFile().getName());
         } catch (Exception ex) {
           status.setText("midi failed: " + ex);
@@ -75,6 +76,7 @@ public final class App {
       midiStop.addActionListener(e -> {
         MidiIn.closeQuietly(player[0]);
         player[0] = null;
+        keys.clearRemoteNotes();  // a stopped file must not leave keys lit
       });
       JPanel midiRow = new JPanel();
       midiRow.add(midiOpen);

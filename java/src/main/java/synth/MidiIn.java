@@ -31,14 +31,19 @@ final class MidiIn {
     };
   }
 
-  static Receiver receiver(int channelFilter) {
+  static Receiver receiver(int channelFilter, KeyboardPanel view) {
     return new Receiver() {
       @Override
       public void send(MidiMessage m, long timestamp) {
         Note n = translate(m, channelFilter);
         if (n == null) return;
-        if (n.vel() < 0) Engine.noteOff(n.note());
-        else Engine.noteOn(n.note(), n.vel());
+        if (n.vel() < 0) {
+          Engine.noteOff(n.note());
+          if (view != null) view.showRemoteNote(n.note(), false);
+        } else {
+          Engine.noteOn(n.note(), n.vel());
+          if (view != null) view.showRemoteNote(n.note(), true);
+        }
       }
 
       @Override
@@ -50,11 +55,11 @@ final class MidiIn {
    * Play a .mid file into the engine. The Sequencer's own thread is the producer; Engine.noteOn/Off
    * serialise it against the EDT. Caller stops it with closeQuietly().
    */
-  static Sequencer playFile(String path, int channelFilter) throws Exception {
+  static Sequencer playFile(String path, int channelFilter, KeyboardPanel view) throws Exception {
     Sequencer seq = MidiSystem.getSequencer(false);  // false: no hardware transmitter attached
     seq.open();
     seq.setSequence(MidiSystem.getSequence(new File(path)));
-    seq.getTransmitter().setReceiver(receiver(channelFilter));
+    seq.getTransmitter().setReceiver(receiver(channelFilter, view));
     seq.start();
     return seq;
   }

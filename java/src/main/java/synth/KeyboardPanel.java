@@ -46,6 +46,10 @@ final class KeyboardPanel extends JComponent {
   static final int MAX_OCTAVE_SHIFT = 2;
 
   private final Set<Integer> held = new LinkedHashSet<>();
+  // Notes sounding from another source (the MIDI-file player). Lit on screen, but deliberately not
+  // in `held`: focus loss and Esc must not silence a file that is still playing, and the mouse/key
+  // bookkeeping must stay about this window's own input. Written from the sequencer thread.
+  private final Set<Integer> remote = java.util.concurrent.ConcurrentHashMap.newKeySet();
   private int mouseNote = -1;
   private int octaveShift = 0;
 
@@ -133,6 +137,26 @@ final class KeyboardPanel extends JComponent {
 
   java.util.Set<Integer> heldNotes() {
     return held;
+  }
+
+  /** Light or unlight a note owned by another source. Thread-safe (repaint is). */
+  void showRemoteNote(int note, boolean on) {
+    if (on) remote.add(note);
+    else remote.remove(note);
+    repaint();
+  }
+
+  void clearRemoteNotes() {
+    remote.clear();
+    repaint();
+  }
+
+  Set<Integer> remoteNotes() {
+    return remote;
+  }
+
+  private boolean lit(int note) {
+    return held.contains(note) || remote.contains(note);
   }
 
   private void setMouseNote(int note) {
@@ -258,7 +282,7 @@ final class KeyboardPanel extends JComponent {
       int note = WHITE_NOTES[w];
       int x = Math.round(w * whiteWidth);
       int next = Math.round((w + 1) * whiteWidth);
-      g.setColor(held.contains(note) ? new Color(150, 200, 255) : Color.WHITE);
+      g.setColor(lit(note) ? new Color(150, 200, 255) : Color.WHITE);
       g.fillRect(x, 0, next - x - 1, height);
       g.setColor(new Color(90, 90, 90));
       g.drawRect(x, 0, next - x - 1, height - 1);
@@ -270,7 +294,7 @@ final class KeyboardPanel extends JComponent {
     for (int w = 0; w + 1 < WHITE_NOTES.length; ++w) {
       if (!hasBlack(w)) continue;
       int note = WHITE_NOTES[w] + 1;
-      g.setColor(held.contains(note) ? new Color(40, 100, 190) : new Color(25, 25, 25));
+      g.setColor(lit(note) ? new Color(40, 100, 190) : new Color(25, 25, 25));
       g.fillRect(Math.round(blackLeft(w, width)), 0, Math.round(blackWidth(width)), blackHeight);
     }
 

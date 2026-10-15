@@ -269,15 +269,36 @@ public final class UiSelfTest {
         "control change ignored");
 
     Thread.sleep(600);  // let the scope section's release finish before counting voices
-    Receiver rec = MidiIn.receiver(MidiIn.ALL_CHANNELS);
+    Receiver rec = MidiIn.receiver(MidiIn.ALL_CHANNELS, keys);
     rec.send(new ShortMessage(0x90, 60, 100), -1);
     rec.send(new ShortMessage(0x90, 64, 100), -1);
     Thread.sleep(120);
     check(Engine.activeVoices() == 2, "synthetic receiver holds 2 voices, got " + Engine.activeVoices());
+    check(keys.remoteNotes().equals(Set.of(60, 64)),
+        "the on-screen keyboard lights for MIDI notes, got " + keys.remoteNotes());
     rec.send(new ShortMessage(0x80, 60, 0), -1);
     rec.send(new ShortMessage(0x80, 64, 0), -1);
     Thread.sleep(700);
     check(Engine.activeVoices() == 0, "synthetic receiver pairs every note-off, got " + Engine.activeVoices());
+    check(keys.remoteNotes().isEmpty(), "MIDI note-offs unlight the keyboard, got " + keys.remoteNotes());
+
+    // A file that is still playing must survive this window losing focus.
+    rec.send(new ShortMessage(0x90, 67, 100), -1);
+    SwingUtilities.invokeAndWait(() -> {
+      for (java.awt.event.FocusListener l : keys.getFocusListeners()) {
+        l.focusLost(new FocusEvent(keys, FocusEvent.FOCUS_LOST));
+      }
+    });
+    Thread.sleep(80);
+    check(keys.remoteNotes().equals(Set.of(67)), "focus loss leaves a MIDI note lit, got " + keys.remoteNotes());
+    check(Engine.activeVoices() == 1, "focus loss does not silence a MIDI note, got " + Engine.activeVoices());
+    rec.send(new ShortMessage(0x80, 67, 0), -1);
+    Thread.sleep(600);
+    check(litPixels(60) > litPixels(-1) + 500,
+        "a MIDI note really paints lit: " + litPixels(60) + " vs " + litPixels(-1) + " lit pixels");
+    keys.showRemoteNote(70, true);
+    keys.clearRemoteNotes();
+    check(keys.remoteNotes().isEmpty(), "clearRemoteNotes unlights everything (used by midi stop)");
 
     // Built-in MIDI-file source: write a sequence, read it back, play it.
     int[] seqNotes = {60, 64, 67, 72, 76};
@@ -319,12 +340,14 @@ public final class UiSelfTest {
     check(mapping, "notes and velocities survive the file path, got " + seen);
 
     // Same file through the real engine path.
-    Sequencer player = MidiIn.playFile(mid.getPath(), MidiIn.ALL_CHANNELS);
+    Sequencer player = MidiIn.playFile(mid.getPath(), MidiIn.ALL_CHANNELS, keys);
     Thread.sleep(600);
     check(Engine.activeVoices() >= 1, "the .mid file drives the engine, voices " + Engine.activeVoices());
+    check(!keys.remoteNotes().isEmpty(), "the .mid file lights the keyboard, got " + keys.remoteNotes());
     while (player.isRunning()) Thread.sleep(50);
     Thread.sleep(600);
     check(Engine.activeVoices() == 0, "the .mid file leaves no stuck voices, got " + Engine.activeVoices());
+    check(keys.remoteNotes().isEmpty(), "the .mid file leaves no stuck lights, got " + keys.remoteNotes());
     check(Engine.underrunCount() == 0, "no underruns while the .mid plays, got " + Engine.underrunCount());
     MidiIn.closeQuietly(player);
 
@@ -358,6 +381,27 @@ public final class UiSelfTest {
 
   private static void click(KeyboardPanel keys, int id, int x, int y) {
     keys.dispatchEvent(new MouseEvent(keys, id, 0, 0, x, y, 1, false));
+  }
+
+  /** Lit white-key pixels on a fresh keyboard, with one remote note lit (note < 0 = none). */
+  private static int litPixels(int note) throws Exception {
+    final int[] out = new int[1];
+    SwingUtilities.invokeAndWait(() -> {
+      KeyboardPanel p = new KeyboardPanel();
+      p.setSize(BIG_W, BIG_H);
+      if (note >= 0) p.showRemoteNote(note, true);
+      java.awt.image.BufferedImage img =
+          new java.awt.image.BufferedImage(BIG_W, BIG_H, java.awt.image.BufferedImage.TYPE_INT_RGB);
+      p.paint(img.createGraphics());
+      int n = 0;
+      for (int y = 0; y < BIG_H; ++y) {
+        for (int x = 0; x < BIG_W; ++x) {
+          if ((img.getRGB(x, y) & 0xFFFFFF) == 0x96C8FF) ++n;
+        }
+      }
+      out[0] = n;
+    });
+    return out[0];
   }
 
   private static void paintScope(ScopePanel scope, int width, int height, String path) throws Exception {
