@@ -7,9 +7,10 @@ import java.util.TreeSet;
 import javax.swing.SwingUtilities;
 
 /**
- * Headless check of the keyboard layer: computer-key map, pixel-to-note geometry at several window
- * sizes (the keyboard scales with the frame), mouse drag, focus-loss note-off, and the engine
- * actually holding the right notes and voices. Run: java -cp build/classes synth.UiSelfTest [png]
+ * Headless check of the UI layer: computer-key map, pixel-to-note geometry at several window
+ * sizes (the keyboard scales with the frame), mouse drag, focus-loss note-off, the eight param
+ * sliders, the scope ring and its paint, and the engine actually holding the right notes and
+ * voices. Run: java -cp build/classes synth.UiSelfTest [png]
  */
 public final class UiSelfTest {
   private static final int BIG_W = 936, BIG_H = 150;
@@ -222,6 +223,29 @@ public final class UiSelfTest {
     Thread.sleep(700);
     check(Engine.activeVoices() == 0, "engine drains to 0 voices, got " + Engine.activeVoices());
     check(Engine.underrunCount() == 0, "no underruns, got " + Engine.underrunCount());
+
+    System.out.println("scope");
+    final ScopePanel[] scopeBox = new ScopePanel[1];
+    SwingUtilities.invokeAndWait(() -> scopeBox[0] = new ScopePanel());
+    ScopePanel scope = scopeBox[0];
+    check(scope.running(), "scope timer runs");
+    check(scope.sample() == ScopePanel.SAMPLES, "scope copies the full " + ScopePanel.SAMPLES + "-sample ring");
+    check(scope.peak() < 1e-3f, "scope reads silence after the drain, peak " + scope.peak());
+    Engine.noteOn(60, 110);
+    Thread.sleep(80);
+    scope.sample();
+    check(scope.peak() > 0.01f, "scope sees a sustained note, peak " + scope.peak());
+    paintScope(scope, 900, ScopePanel.PREF_HEIGHT, "build/scope.png");
+    paintScope(scope, KeyboardPanel.MIN_WIDTH, ScopePanel.MIN_HEIGHT, "build/scope-small.png");
+    for (int i = 0; i < 60; ++i) {
+      scope.sample();
+      Thread.sleep(16);
+    }
+    check(Engine.underrunCount() == 0, "60 scope polls cause no underruns, got " + Engine.underrunCount());
+    check(Engine.activeVoices() == 1, "note still sounding while the scope polls, got " + Engine.activeVoices());
+    Engine.noteOff(60);
+    SwingUtilities.invokeAndWait(scope::stop);
+    check(!scope.running(), "scope timer stops");
     Engine.stop();
 
     System.out.println(failures == 0 ? "UI self-test OK" : "UI self-test FAILURES=" + failures);
@@ -230,6 +254,20 @@ public final class UiSelfTest {
 
   private static void click(KeyboardPanel keys, int id, int x, int y) {
     keys.dispatchEvent(new MouseEvent(keys, id, 0, 0, x, y, 1, false));
+  }
+
+  private static void paintScope(ScopePanel scope, int width, int height, String path) throws Exception {
+    SwingUtilities.invokeAndWait(() -> {
+      scope.setSize(width, height);
+      java.awt.image.BufferedImage img =
+          new java.awt.image.BufferedImage(width, height, java.awt.image.BufferedImage.TYPE_INT_RGB);
+      scope.paint(img.createGraphics());
+      try {
+        javax.imageio.ImageIO.write(img, "png", new java.io.File(path));
+      } catch (java.io.IOException e) {
+        throw new RuntimeException(e);
+      }
+    });
   }
 
   private static void renderPng(int width, int height, String path) throws Exception {

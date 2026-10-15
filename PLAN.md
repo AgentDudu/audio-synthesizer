@@ -3,9 +3,9 @@
 Java (Swing) UI ⇄ JNI ⇄ C++ audio engine (RtAudio). Windows-first, designed so Linux/macOS
 later is a CMake flag change, not a rewrite.
 
-Status: **keyboard UI playable and on `main`** — 88-key piano (A0-C8), mouse + computer keys,
-scales with the window. `main` `b356b3c`, `develop` `03ce54e` (PRs #1-#3 merged). No tag cut yet,
-see §10. Next: knobs + scope.
+Status: **v0.2.0 on `main`** — 88-key piano (A0-C8) with mouse + computer keys that scales with the
+window, eight live param sliders, live scope. `main` `d87f3d6` (tag `v0.2.0`), `develop` tracks it.
+Next: MIDI-file input (M4a), then polish.
 
 ---
 
@@ -260,10 +260,10 @@ Targets: `-Target probe` (device report) | `smoke` (headless engine check + WAV 
 | **M0** ✅ | `git init`, vendored RtAudio, CMake builds `synthjni.dll`, Java loads it | **Passed 2026-10-15:** `probeDevices()` printed `rtaudio 6.0.1 api=7`, 9 WASAPI devices, default out = `Speakers (Realtek)` id=132. |
 | **M1** ✅ | Engine: WASAPI stream, note-on/off, 16-voice poly, sine/saw voice | **Passed 2026-10-15:** `ctest` 100% (no NaN, audible 1 s render, release silent, 20 notes → ≤16 voices, cutoff reaches the filter, WAV header parses); live run on device 132 @48 k/512 → `underruns=0`, `activeVoices=0` after release; `build/out.wav` = 2.000 s stereo 16-bit, peak 12262/32767. |
 | **M2** ✅ | Swing keyboard (mouse click + drag) + computer-key map, full 88-key range, resizable | **Passed 2026-10-15** (PRs #1-#3): click and keys both sound; note-off on release; focus loss + Esc clear every held note; `UiSelfTest` 47 checks incl. all 88 notes clickable at 936x150, 420x80 and 320x60, and exact notes asserted from dispatched mouse events. Scope grew: the plan said one octave of computer keys on a two-octave keyboard; the user asked for the whole piano, then for it to scale with the window. |
-| **M3** | Params live: ADSR, cutoff, resonance, osc mix, master gain | Dragging a knob while a note sustains changes sound with no click; params read back correctly. |
+| **M3** ✅ | Params live: ADSR, cutoff, resonance, osc mix, master gain | **Passed 2026-10-16** (PR #5): eight sliders under the keyboard, each change event calls `setParam`, so a knob moved during a sustained note is heard immediately. `UiSelfTest`: every slider spans its spec range, tick↔engine round-trips, sliders initialise from `getParam`, every value reaches the engine, two notes survive a full cutoff+level sweep with `underruns == 0`. Slider ticks are 0..1000 mapped by a pure pair; cutoff and the time params use a log scale. |
 | **M4a** | MIDI-in adapter: one `Receiver` → `Engine.noteOn/Off`, plus a **built-in MIDI-file source** (`Sequencer.getTransmitter()`) | No hardware needed. A `.mid` file drives the engine; note-on/off pairs balanced, velocity respected, channel filtering correct. Unit-testable with synthetic `ShortMessage`s. |
 | **M4b** *(optional)* | Real MIDI device in (hardware controller, or VMPK + loopMIDI virtual cable) | Device appears in `MidiSystem.getMidiDeviceInfo()` re-scan; live playing works; MIDI + on-screen keyboard coexist. |
-| **M5** | Scope panel (WAV export already shipped with M1) | 60 fps scope from `getScope`; `renderWav` file opens in a player, header parses, duration matches ±10 ms. |
+| **M5** ✅ | Scope panel (WAV export already shipped with M1) | **Passed 2026-10-16**: `ScopePanel` polls the engine's 1024-sample ring on a 16 ms Swing `Timer` (~60 fps) and paints it auto-scaled. `UiSelfTest`: silence reads flat, a sustained note peaks 0.22, 60 polls cause `underruns == 0` while the note keeps sounding, the timer stops on window close, and the trace paints at 900x120 (1550 wave px) and 320x40 (623 wave px). |
 | **M6** | Polish: device picker, buffer-size control, quit-cleanup, README | Clean exit with no orphan stream; README has build+run for a stranger. |
 | **M7** *(optional)* | polyBLEP oscillators, stereo voices, simple delay | Aliasable saw sounds audibly cleaner A/B against M6 build. |
 

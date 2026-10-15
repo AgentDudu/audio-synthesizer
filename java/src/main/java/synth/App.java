@@ -47,16 +47,21 @@ public final class App {
           + "   A0-C8 on screen   computer keys: a w s e d f t g y h u j k   arrows: octave"
           + "   esc: all notes off");
       KnobPanel knobs = new KnobPanel();
+      ScopePanel scope = new ScopePanel();
+      JPanel center = new JPanel(new BorderLayout());
+      center.add(scope, BorderLayout.NORTH);
+      center.add(keys, BorderLayout.CENTER);
       JPanel south = new JPanel(new BorderLayout());
       south.add(knobs, BorderLayout.CENTER);
       south.add(status, BorderLayout.SOUTH);
       frame.setLayout(new BorderLayout());
-      frame.add(keys, BorderLayout.CENTER);
+      frame.add(center, BorderLayout.CENTER);
       frame.add(south, BorderLayout.SOUTH);
       frame.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
       frame.addWindowListener(new WindowAdapter() {
         @Override
         public void windowClosing(WindowEvent e) {
+          scope.stop();  // otherwise the 60 fps timer keeps the EDT alive after dispose
           Engine.stop();
         }
       });
