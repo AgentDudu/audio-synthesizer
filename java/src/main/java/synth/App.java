@@ -3,6 +3,8 @@ package synth;
 import java.awt.BorderLayout;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
+import javax.swing.JButton;
+import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
@@ -54,6 +56,31 @@ public final class App {
       JPanel south = new JPanel(new BorderLayout());
       south.add(knobs, BorderLayout.CENTER);
       south.add(status, BorderLayout.SOUTH);
+
+      // MIDI-file source (M4a): no hardware, the Sequencer's transmitter feeds our Receiver.
+      JButton midiOpen = new JButton("midi file\u2026");
+      JButton midiStop = new JButton("midi stop");
+      final javax.sound.midi.Sequencer[] player = new javax.sound.midi.Sequencer[1];
+      midiOpen.addActionListener(e -> {
+        JFileChooser chooser = new JFileChooser();
+        if (chooser.showOpenDialog(frame) != JFileChooser.APPROVE_OPTION) return;
+        MidiIn.closeQuietly(player[0]);
+        try {
+          player[0] = MidiIn.playFile(chooser.getSelectedFile().getPath(), MidiIn.ALL_CHANNELS);
+          status.setText("playing " + chooser.getSelectedFile().getName());
+        } catch (Exception ex) {
+          status.setText("midi failed: " + ex);
+        }
+      });
+      midiStop.addActionListener(e -> {
+        MidiIn.closeQuietly(player[0]);
+        player[0] = null;
+      });
+      JPanel midiRow = new JPanel();
+      midiRow.add(midiOpen);
+      midiRow.add(midiStop);
+      south.add(midiRow, BorderLayout.WEST);
+
       frame.setLayout(new BorderLayout());
       frame.add(center, BorderLayout.CENTER);
       frame.add(south, BorderLayout.SOUTH);
@@ -61,6 +88,7 @@ public final class App {
       frame.addWindowListener(new WindowAdapter() {
         @Override
         public void windowClosing(WindowEvent e) {
+          MidiIn.closeQuietly(player[0]);
           scope.stop();  // otherwise the 60 fps timer keeps the EDT alive after dispose
           Engine.stop();
         }

@@ -4,13 +4,21 @@ import java.awt.event.FocusEvent;
 import java.awt.event.MouseEvent;
 import java.util.Set;
 import java.util.TreeSet;
+import javax.sound.midi.MidiEvent;
+import javax.sound.midi.MidiMessage;
+import javax.sound.midi.MidiSystem;
+import javax.sound.midi.Receiver;
+import javax.sound.midi.Sequence;
+import javax.sound.midi.Sequencer;
+import javax.sound.midi.ShortMessage;
+import javax.sound.midi.Track;
 import javax.swing.SwingUtilities;
 
 /**
  * Headless check of the UI layer: computer-key map, pixel-to-note geometry at several window
  * sizes (the keyboard scales with the frame), mouse drag, focus-loss note-off, the eight param
- * sliders, the scope ring and its paint, and the engine actually holding the right notes and
- * voices. Run: java -cp build/classes synth.UiSelfTest [png]
+ * sliders, the scope ring and its paint, the MIDI parsing and the built-in MIDI-file source, and
+ * the engine actually holding the right notes and voices. Run: java -cp build/classes synth.UiSelfTest [png]
  */
 public final class UiSelfTest {
   private static final int BIG_W = 936, BIG_H = 150;
@@ -246,6 +254,102 @@ public final class UiSelfTest {
     Engine.noteOff(60);
     SwingUtilities.invokeAndWait(scope::stop);
     check(!scope.running(), "scope timer stops");
+
+    System.out.println("midi");
+    check(MidiIn.translate(new ShortMessage(0x90, 60, 100), MidiIn.ALL_CHANNELS).equals(new MidiIn.Note(60, 100)),
+        "note-on parses with velocity");
+    check(MidiIn.translate(new ShortMessage(0x90, 60, 0), MidiIn.ALL_CHANNELS).equals(new MidiIn.Note(60, -1)),
+        "note-on with velocity 0 means note-off");
+    check(MidiIn.translate(new ShortMessage(0x80, 64, 40), MidiIn.ALL_CHANNELS).equals(new MidiIn.Note(64, -1)),
+        "note-off parses");
+    check(MidiIn.translate(new ShortMessage(0x91, 64, 90), 0) == null, "other channel filtered out");
+    check(MidiIn.translate(new ShortMessage(0x91, 64, 90), 1).equals(new MidiIn.Note(64, 90)),
+        "filtered channel passes when it matches");
+    check(MidiIn.translate(new ShortMessage(0xB0, 7, 100), MidiIn.ALL_CHANNELS) == null,
+        "control change ignored");
+
+    Thread.sleep(600);  // let the scope section's release finish before counting voices
+    Receiver rec = MidiIn.receiver(MidiIn.ALL_CHANNELS);
+    rec.send(new ShortMessage(0x90, 60, 100), -1);
+    rec.send(new ShortMessage(0x90, 64, 100), -1);
+    Thread.sleep(120);
+    check(Engine.activeVoices() == 2, "synthetic receiver holds 2 voices, got " + Engine.activeVoices());
+    rec.send(new ShortMessage(0x80, 60, 0), -1);
+    rec.send(new ShortMessage(0x80, 64, 0), -1);
+    Thread.sleep(700);
+    check(Engine.activeVoices() == 0, "synthetic receiver pairs every note-off, got " + Engine.activeVoices());
+
+    // Built-in MIDI-file source: write a sequence, read it back, play it.
+    int[] seqNotes = {60, 64, 67, 72, 76};
+    int[] seqVels = {100, 60, 127, 1, 90};
+    java.io.File mid = new java.io.File("build/test.mid");
+    Sequence file = new Sequence(Sequence.PPQ, 480);
+    Track tr = file.createTrack();
+    for (int i = 0; i < seqNotes.length; ++i) {
+      tr.add(new MidiEvent(new ShortMessage(0x90, seqNotes[i], seqVels[i]), i * 480));
+      tr.add(new MidiEvent(new ShortMessage(0x80, seqNotes[i], 0), i * 480 + 360));
+    }
+    MidiSystem.write(file, 1, mid);
+    check(mid.length() > 0, "wrote build/test.mid (" + mid.length() + " bytes)");
+
+    // Velocity and pairing, observed at the Receiver boundary where it is deterministic.
+    java.util.List<MidiIn.Note> seen = new java.util.ArrayList<>();
+    Sequencer probe = MidiSystem.getSequencer(false);
+    probe.open();
+    probe.setSequence(MidiSystem.getSequence(mid));
+    probe.getTransmitter().setReceiver(new Receiver() {
+      @Override
+      public void send(MidiMessage m, long ts) {
+        MidiIn.Note n = MidiIn.translate(m, MidiIn.ALL_CHANNELS);
+        if (n != null) seen.add(n);
+      }
+
+      @Override
+      public void close() {}
+    });
+    probe.start();
+    while (probe.isRunning()) Thread.sleep(50);
+    MidiIn.closeQuietly(probe);
+    check(seen.size() == seqNotes.length * 2, "file source emits one note-off per note-on, got " + seen.size());
+    boolean mapping = true;
+    for (int i = 0; i < seqNotes.length && i < seen.size() / 2; ++i) {
+      mapping &= seen.get(2 * i).equals(new MidiIn.Note(seqNotes[i], seqVels[i]));
+      mapping &= seen.get(2 * i + 1).equals(new MidiIn.Note(seqNotes[i], -1));
+    }
+    check(mapping, "notes and velocities survive the file path, got " + seen);
+
+    // Same file through the real engine path.
+    Sequencer player = MidiIn.playFile(mid.getPath(), MidiIn.ALL_CHANNELS);
+    Thread.sleep(600);
+    check(Engine.activeVoices() >= 1, "the .mid file drives the engine, voices " + Engine.activeVoices());
+    while (player.isRunning()) Thread.sleep(50);
+    Thread.sleep(600);
+    check(Engine.activeVoices() == 0, "the .mid file leaves no stuck voices, got " + Engine.activeVoices());
+    check(Engine.underrunCount() == 0, "no underruns while the .mid plays, got " + Engine.underrunCount());
+    MidiIn.closeQuietly(player);
+
+    // Two producers at once (EDT + MIDI receiver). Paced so the 256-slot ring never fills.
+    Runnable spam = () -> {
+      for (int i = 0; i < 100; ++i) {
+        Engine.noteOn(60, 90);
+        Engine.noteOff(60);
+        if (i % 8 == 0) {
+          try {
+            Thread.sleep(3);
+          } catch (InterruptedException ignored) {
+          }
+        }
+      }
+    };
+    Thread pa = new Thread(spam), pb = new Thread(spam);
+    pa.start();
+    pb.start();
+    pa.join();
+    pb.join();
+    Thread.sleep(700);
+    check(Engine.activeVoices() == 0, "200 events from each of two threads drain to 0, got " + Engine.activeVoices());
+    check(Engine.underrunCount() == 0, "two producers cause no underruns, got " + Engine.underrunCount());
+
     Engine.stop();
 
     System.out.println(failures == 0 ? "UI self-test OK" : "UI self-test FAILURES=" + failures);
