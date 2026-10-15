@@ -69,6 +69,38 @@ int main() {
   printf("cutoff_hi_rms=%.5f cutoff_lo_rms=%.5f\n", hiRms, loRms);
   check(loRms < hiRms * 0.2, "cutoff param reaches the filter");
 
+  // M8: the waterfall display reads a per-block snapshot of each voice's note + envelope level.
+  {
+    Synth v;
+    int notes[Synth::kVoices];
+    float levels[Synth::kVoices];
+    check(v.snapshotVoices(notes, levels) == 0, "voice snapshot empty before any note");
+    std::vector<float> blk(64 * 2, 0.f);
+    v.noteOn(60, 127, fs);
+    v.renderBlock(blk.data(), 64, fs);
+    int n = v.snapshotVoices(notes, levels);
+    printf("snapshot_n=%d note=%d level=%.4f\n", n, n ? notes[0] : -1, n ? levels[0] : 0.f);
+    check(n == 1 && notes[0] == 60, "voice snapshot reports note 60");
+    float first = n == 1 ? levels[0] : 0.f;
+    v.renderBlock(blk.data(), 64, fs);
+    n = v.snapshotVoices(notes, levels);
+    check(n == 1 && levels[0] > first, "snapshot level rises through the attack");
+    v.noteOn(64, 100, fs);
+    v.renderBlock(blk.data(), 64, fs);
+    n = v.snapshotVoices(notes, levels);
+    bool has60 = false, has64 = false;
+    for (int i = 0; i < n; ++i) {
+      if (notes[i] == 60) has60 = true;
+      if (notes[i] == 64) has64 = true;
+    }
+    check(n == 2 && has60 && has64, "two held notes both appear in the snapshot");
+    v.noteOff(60);
+    v.noteOff(64);
+    std::vector<float> rel(48000 * 2, 0.f);
+    v.renderBlock(rel.data(), 48000, fs);  // 1 s: the release is effectively silent after ~0.25 s
+    check(v.snapshotVoices(notes, levels) == 0, "voice snapshot empty after the release");
+  }
+
   // The filter must not blow up at the extremes (a Chamberlin SVF did exactly this).
   Synth extreme;
   extreme.setParam(kCutoff, 20000.f);

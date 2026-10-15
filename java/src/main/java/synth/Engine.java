@@ -32,6 +32,9 @@ public final class Engine {
   /** Copies the last out.length output frames into out; returns how many were copied. */
   public static native int getScope(float[] out);
 
+  /** Active voices as the audio thread saw them: note + envelope level per slot. Returns the count. */
+  public static native int getVoiceLevels(int[] notes, float[] levels);
+
   /** Offline bounce of the given notes with the current params. Null on success, else error text. */
   public static native String renderWav(String path, double seconds, int[] notes, int[] velocities);
 

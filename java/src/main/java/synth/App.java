@@ -1,6 +1,7 @@
 package synth;
 
 import java.awt.BorderLayout;
+import java.awt.FlowLayout;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import javax.swing.JButton;
@@ -8,6 +9,7 @@ import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.JToggleButton;
 import javax.swing.SwingUtilities;
 import javax.swing.WindowConstants;
 
@@ -50,8 +52,17 @@ public final class App {
           + "   esc: all notes off");
       KnobPanel knobs = new KnobPanel();
       ScopePanel scope = new ScopePanel();
+      JToggleButton waterfall = new JToggleButton("waterfall");
+      waterfall.setToolTipText("one column per key, newest at the keyboard edge");
+      waterfall.addActionListener(e -> scope.setMode(
+          waterfall.isSelected() ? ScopePanel.Mode.WATERFALL : ScopePanel.Mode.WAVE));
+      JPanel stripHead = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+      stripHead.add(waterfall);
+      JPanel strip = new JPanel(new BorderLayout());
+      strip.add(stripHead, BorderLayout.NORTH);
+      strip.add(scope, BorderLayout.CENTER);
       JPanel center = new JPanel(new BorderLayout());
-      center.add(scope, BorderLayout.NORTH);
+      center.add(strip, BorderLayout.NORTH);
       center.add(keys, BorderLayout.CENTER);
       JPanel south = new JPanel(new BorderLayout());
       south.add(knobs, BorderLayout.CENTER);
