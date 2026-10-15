@@ -3,8 +3,9 @@
 Java (Swing) UI ⇄ JNI ⇄ C++ audio engine (RtAudio). Windows-first, designed so Linux/macOS
 later is a CMake flag change, not a rewrite.
 
-Status: **full-keyboard UI playable** — the whole 88-key piano (A0-C8) is on screen, scales with
-the window, and drives the engine. M0 `5eb7d3c`, M1 `b08ee54`. Next: knobs + scope (M3).
+Status: **keyboard UI playable and on `main`** — 88-key piano (A0-C8), mouse + computer keys,
+scales with the window. `main` `b356b3c`, `develop` `03ce54e` (PRs #1-#3 merged). No tag cut yet,
+see §10. Next: knobs + scope.
 
 ---
 
@@ -92,7 +93,7 @@ Swing EDT (Java)                         C++ process (same JVM)
   no file I/O, no logging, **no JNI calls back into Java** (no JNIEnv is attached to it and the
   JVM would add unbounded pause). Java never receives a callback at all.
 - One producer per queue. If two Java threads must produce (EDT + MIDI receiver), funnel both
-  through one Java-side synchronized enqueue, or make the queue MPMC — decision Q3.
+  through one Java-side synchronized enqueue, or make the queue MPMC — resolved as §8.4.
 
 ### 2.2 Signal chain (v1)
 
@@ -125,10 +126,11 @@ audio-synthesizer/
     CMakeLists.txt               # FindJNI + rtaudio subdirectory + shared lib target
     third_party/rtaudio/         # vendored RtAudio 6.0.1 (RtAudio.h/.cpp + CMakeLists.txt)
     include/synth/
-      audio_engine.hpp  synth.hpp  voice.hpp  dsp.hpp  spsc_queue.hpp  wav_writer.hpp
+      audio_engine.hpp  synth.hpp  voice.hpp  params.hpp  spsc_queue.hpp  wav_writer.hpp
+      dsp.hpp                    # header-only (osc, ADSR, RBJ biquad, soft clip) - no dsp.cpp
     src/
       jni_bridge.cpp             # the ONLY file that knows about JNIEnv
-      audio_engine.cpp  synth.cpp  voice.cpp  dsp.cpp  wav_writer.cpp
+      audio_engine.cpp  synth.cpp  voice.cpp  wav_writer.cpp
     tests/
       engine_tests.cpp           # assert-based, no framework, no audio device needed
   java/src/main/java/synth/
@@ -187,28 +189,44 @@ Notes:
 ```cmake
 cmake_minimum_required(VERSION 3.16)
 project(synthjni CXX)
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 17)
 
-find_package(JNI REQUIRED)                 # uses $ENV{JAVA_HOME} / JAVA_HOME
-add_subdirectory(third_party/rtaudio)      # RtAudio 6.0.1
+find_package(JNI REQUIRED)
 
-add_library(synthjni SHARED
-  src/jni_bridge.cpp src/audio_engine.cpp src/synth.cpp
-  src/voice.cpp src/dsp.cpp src/wav_writer.cpp)
-target_include_directories(synthjni PRIVATE ${JNI_INCLUDE_DIRS} include)
-target_compile_definitions(synthjni PRIVATE __WINDOWS_WASAPI__ WIN32_LEAN_AND_MEAN NOMINMAX)
-target_link_libraries(synthjni PRIVATE rtaudio)
+# Vendored RtAudio 6.0.1: static (no extra runtime DLL), WASAPI only, no upstream test programs.
+set(RTAUDIO_BUILD_STATIC_LIBS ON CACHE BOOL "" FORCE)
+set(RTAUDIO_API_WASAPI ON        CACHE BOOL "" FORCE)
+set(RTAUDIO_API_DS OFF           CACHE BOOL "" FORCE)
+set(RTAUDIO_API_ASIO OFF         CACHE BOOL "" FORCE)
+add_subdirectory(third_party/rtaudio)
+
+# Engine + DSP in a static lib shared by the JNI DLL and the offline tests, so the tests do not
+# inherit a jvm.dll dependency.
+add_library(synth_core STATIC
+  src/audio_engine.cpp src/synth.cpp src/voice.cpp src/wav_writer.cpp)
+target_include_directories(synth_core PUBLIC include)
+# rtaudio defines its backend PRIVATEly, so every consumer must define it too.
+target_compile_definitions(synth_core PUBLIC __WINDOWS_WASAPI__ WIN32_LEAN_AND_MEAN NOMINMAX)
+target_link_libraries(synth_core PUBLIC rtaudio)
+
+add_library(synthjni SHARED src/jni_bridge.cpp)
+set_target_properties(synthjni PROPERTIES PREFIX "")   # synthjni.dll, not libsynthjni.dll
+target_include_directories(synthjni PRIVATE ${JNI_INCLUDE_DIRS})
+target_link_libraries(synthjni PRIVATE synth_core ${JNI_LIBRARIES})
 
 if (MINGW)
   # WASAPI under MinGW-w64 needs the Media Foundation + KS libs (thestk/rtaudio#184)
-  target_link_libraries(synthjni PRIVATE ksuser mfplat mfuuid wmcodecdspuuid ole32 uuid)
+  target_link_libraries(synth_core PUBLIC ksuser mfplat mfuuid wmcodecdspuuid ole32 uuid winmm user32)
   # ship without libgcc/libstdc++/winpthread DLLs on PATH
   target_link_options(synthjni PRIVATE -static-libgcc -static-libstdc++)
 endif()
 
 enable_testing()
 add_executable(engine_tests tests/engine_tests.cpp)
-target_link_options(engine_tests PRIVATE -static)   # run without MinGW on PATH
+target_link_libraries(engine_tests PRIVATE synth_core)
+if (MINGW)
+  target_link_options(engine_tests PRIVATE -static)   # run without MinGW DLLs on PATH
+endif()
 add_test(NAME engine_tests COMMAND engine_tests)
 ```
 
@@ -221,10 +239,13 @@ Same API above the `RtAudio` abstraction, slightly worse latency.
 ### 5.2 `build.ps1` (single command, ordered)
 
 ```powershell
-javac -h native/include -d build/classes (Get-ChildItem -Recurse java/src/main/java -Filter *.java).FullName
-cmake -S native -B build/native -G "MinGW Makefiles"
+# pinned toolchain: two MinGW installs sit on PATH, so the script names the validated pair
+$gccDir = 'C:/Strawberry/c/bin'
+javac -h native/include -d build/classes $sources      # must run before cmake: synth_Engine.h
+cmake -S native -B build/native -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release `
+      -DCMAKE_CXX_COMPILER="$gccDir/g++.exe" -DCMAKE_MAKE_PROGRAM="$gccDir/mingw32-make.exe"
 cmake --build build/native
-java -Djava.library.path=build/native -cp build/classes synth.App
+java -Djava.library.path=build/native -cp build/classes synth.App <mode>
 ```
 
 Targets: `-Target probe` (device report) | `smoke` (headless engine check + WAV bounce) |
@@ -238,11 +259,11 @@ Targets: `-Target probe` (device report) | `smoke` (headless engine check + WAV 
 |---|---|---|
 | **M0** ✅ | `git init`, vendored RtAudio, CMake builds `synthjni.dll`, Java loads it | **Passed 2026-10-15:** `probeDevices()` printed `rtaudio 6.0.1 api=7`, 9 WASAPI devices, default out = `Speakers (Realtek)` id=132. |
 | **M1** ✅ | Engine: WASAPI stream, note-on/off, 16-voice poly, sine/saw voice | **Passed 2026-10-15:** `ctest` 100% (no NaN, audible 1 s render, release silent, 20 notes → ≤16 voices, cutoff reaches the filter, WAV header parses); live run on device 132 @48 k/512 → `underruns=0`, `activeVoices=0` after release; `build/out.wav` = 2.000 s stereo 16-bit, peak 12262/32767. |
-| **M2** | Swing keyboard (mouse click) + computer-key map (`awsedftgyhujk` = one octave) | Click and keys both sound; note-off on key release; no stuck notes after window focus loss. |
+| **M2** ✅ | Swing keyboard (mouse click + drag) + computer-key map, full 88-key range, resizable | **Passed 2026-10-15** (PRs #1-#3): click and keys both sound; note-off on release; focus loss + Esc clear every held note; `UiSelfTest` 47 checks incl. all 88 notes clickable at 936x150, 420x80 and 320x60, and exact notes asserted from dispatched mouse events. Scope grew: the plan said one octave of computer keys on a two-octave keyboard; the user asked for the whole piano, then for it to scale with the window. |
 | **M3** | Params live: ADSR, cutoff, resonance, osc mix, master gain | Dragging a knob while a note sustains changes sound with no click; params read back correctly. |
 | **M4a** | MIDI-in adapter: one `Receiver` → `Engine.noteOn/Off`, plus a **built-in MIDI-file source** (`Sequencer.getTransmitter()`) | No hardware needed. A `.mid` file drives the engine; note-on/off pairs balanced, velocity respected, channel filtering correct. Unit-testable with synthetic `ShortMessage`s. |
 | **M4b** *(optional)* | Real MIDI device in (hardware controller, or VMPK + loopMIDI virtual cable) | Device appears in `MidiSystem.getMidiDeviceInfo()` re-scan; live playing works; MIDI + on-screen keyboard coexist. |
-| **M5** | Scope panel + WAV export | 60 fps scope from `getScope`; `renderWav` file opens in a player, header parses, duration matches ±10 ms. |
+| **M5** | Scope panel (WAV export already shipped with M1) | 60 fps scope from `getScope`; `renderWav` file opens in a player, header parses, duration matches ±10 ms. |
 | **M6** | Polish: device picker, buffer-size control, quit-cleanup, README | Clean exit with no orphan stream; README has build+run for a stranger. |
 | **M7** *(optional)* | polyBLEP oscillators, stereo voices, simple delay | Aliasable saw sounds audibly cleaner A/B against M6 build. |
 
@@ -287,7 +308,7 @@ input device exists, which is exactly this machine's current state.
 | **R8** | WASAPI shared mode ≠ ASIO latency | Accept ~10–30 ms in v1; ASIO backend is a later `RtAudio` define, not a rewrite. |
 | **R9** | Swing EDT blocked by native call | All native setters are O(1) queue writes; `renderWav` runs off-EDT (`SwingWorker`). |
 | **R11** | Resonant-filter instability: the planned Chamberlin SVF produced NaN near 18 kHz / Q 1.2 | Swapped to an RBJ biquad (coefficients set per block). `engine_tests` asserts finiteness at max cutoff + max resonance. |
-| **R12** | Stuck voices on focus loss / panic — not yet handled | M2 must call `noteOff` on focus loss and expose an all-notes-off; `activeVoices()` is already exported to prove it. |
+| **R12** | Stuck voices on focus loss / panic | **Handled in the keyboard layer:** held notes live in one Java-side set; focus loss and Esc send `noteOff` for every one; `activeVoices()` proves the drain (`engine drains to 0 voices`). Key auto-repeat cannot retrigger. |
 
 ---
 
@@ -317,15 +338,18 @@ input device exists, which is exactly this machine's current state.
    asserts all 88 notes A0-C8 are reachable by click. AWT swallows synthetic `FocusEvent`s, so
    the test calls the registered `FocusListener` directly. Its `png` mode renders the keyboard to
    `build/keyboard.png`; geometry was checked by reading pixel runs, not by eyeballing.
-
----
-
 10. **Keyboard geometry is a function of the component size**, not constants: key width, black-key
     width/height, label size and the marker bar all come from `getWidth()`/`getHeight()`, and
     painting and hit-testing call the same helpers — so resizing the window cannot desync what you
     see from what you click. Minimum size 320x60. Consequence worth knowing: a black key is centred
     exactly on the boundary between two white keys, so the pixel under its left half is the lower
     white key and under its right half is the upper one.
+11. **WAV export arrived early.** `renderWav` shipped with the engine and was verified by parsing
+    the bytes (2.000 s stereo 16-bit, peak 12262/32767), so M5 is scope-only.
+12. **C++ is split `synth_core` (static) + `synthjni` (shared).** Not in the original plan: the
+    offline tests link `synth_core`, so they never pull in `jvm.lib` and need no JVM to run.
+13. **`build.ps1` pins the toolchain** to `C:/Strawberry/c/bin` (g++ 13.2 + CMake 3.29). Two MinGW
+    installs are on PATH; unpinned, the build silently picks g++ 15.2 + CMake 4.3.
 
 ## 9. Explicitly out of scope for v1
 
@@ -343,7 +367,7 @@ Agreed 2026-10-15. Remote: `https://github.com/AgentDudu/audio-synthesizer.git` 
 |---|---|
 | `main` | Releases only. Every merge in gets a tag (`v0.1.0`). |
 | `develop` | Integration branch. All day-to-day work lands here. |
-| `feature/<milestone>-<slug>` | One milestone = one branch, cut from `develop` (e.g. `feature/m2-swing-keyboard`). |
+| `feature/<slug>` | One unit of work = one branch, cut from `develop` (`feature/full-keyboard`, `feature/resize-keyboard`). No milestone/phase labels in branch names. |
 | `release/x.y.z` | Cut from `develop` when a milestone set is shippable; fix-only changes, then merge to `main` + tag, then back-merge `main` → `develop`. |
 | `hotfix/x.y.z` | Emergency fix from `main`; merge to both `main` and `develop`. |
 
@@ -355,17 +379,24 @@ Rules:
   `type(scope): subject` — imperative mood, ≤72 chars, body explains *why*.
   Types in use: `feat`, `fix`, `docs`, `test`, `refactor`, `perf`, `chore`, `build`.
   Scope is the area: `engine`, `dsp`, `jni`, `ui`, `midi`, `build`, `docs`.
+  **Subjects never name a milestone or phase** (`feat(ui): scale the keyboard with the window`,
+  not `feat: M2 keyboard`). Milestone labels live in PLAN.md only.
   Breaking changes: `feat(jni)!: ...` plus a `BREAKING CHANGE:` footer.
 - Infra/docs-only commits may go straight to `develop`; anything that changes behaviour goes
-  through a feature branch.
+  through a feature branch **and a PR** — merging is an explicit user decision.
 
-M2 example:
+The flow in practice (PRs #1-#3):
 
 ```bash
-git switch -c feature/m2-swing-keyboard develop
-# ... commit as you go: feat(ui): add on-screen keyboard with mouse input
-git switch develop && git merge --no-ff feature/m2-swing-keyboard && git push
+git switch -c feature/resize-keyboard develop
+# ... commit as you go: feat(ui): scale the keyboard with the window
+git push -u origin feature/resize-keyboard
+gh pr create --base develop --head feature/resize-keyboard   # evidence goes in the body
+gh pr merge --merge --delete-branch                          # only after the user approves
 ```
 
-Current state: `main` and `develop` both at `b08ee54` (M0 `5eb7d3c` + M1 `b08ee54`, pushed
-2026-10-15). M0/M1 predate the branch model and stay as they are — no history rewrite.
+Current state (2026-10-15): `develop` `03ce54e`, `main` `b356b3c` (merge of `develop`, pushed).
+PRs #1 (keyboard), #2 (88 keys), #3 (resize) merged. **No tag exists yet** — `main` has content but
+the `v0.1.0` release tag was never cut, so the "every merge to `main` gets a tag" rule is currently
+broken by us, not by the plan. M0/M1 commits predate the message rules and stay as they are — no
+history rewrite on pushed branches.
