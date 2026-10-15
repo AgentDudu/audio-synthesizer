@@ -46,6 +46,10 @@ class AudioEngine {
   // shortcut: upgrade to a second atomic cursor pair if the scope ever needs sample accuracy.
   int copyScope(float *dst, int n) const;
 
+  // Active voices as the audio thread saw them at the end of the last block: note + envelope level,
+  // at most Synth::kVoices entries. A snapshot, not live state (PLAN.md §8.14).
+  int voiceLevels(int *notes, float *levels) const;
+
   // Offline bounce of the given notes with the current parameters. Race-free by construction:
   // Java is the source of truth for what is held, so nothing is read from the live Synth here.
   bool renderWav(const std::string &path, double seconds, const std::vector<int> &notes,
@@ -63,6 +67,9 @@ class AudioEngine {
   float scope_[kScopeSize]{};
   std::atomic<unsigned> scopePos_{0};
   std::atomic<unsigned> activeVoices_{0};
+  // -1 in voiceNote_ means the slot is free. Written once per audio block, read by JNI.
+  std::atomic<int> voiceNote_[Synth::kVoices]{};
+  std::atomic<float> voiceLevel_[Synth::kVoices]{};
   std::atomic<unsigned long long> underruns_{0};
 };
 

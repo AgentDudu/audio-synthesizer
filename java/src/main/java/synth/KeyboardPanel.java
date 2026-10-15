@@ -192,6 +192,8 @@ final class KeyboardPanel extends JComponent {
     return false;
   }
 
+  static boolean isBlack(int note) { return !isWhite(note); }
+
   private static int[] buildWhiteNotes() {
     int count = 0;
     for (int note = LOWEST_NOTE; note <= HIGHEST_NOTE; ++note) {
@@ -235,14 +237,20 @@ final class KeyboardPanel extends JComponent {
     return (whiteIndex + 1) * whiteWidth(width) - blackWidth(width) / 2f;
   }
 
-  /** Left pixel edge of the white key holding `note`. */
-  static float leftOfNote(int note, int width) {
+  /** Index of the white key `note` sits on, or -1 below the keyboard. */
+  static int whiteIndexOf(int note) {
     for (int w = 0; w < WHITE_NOTES.length; ++w) {
       if (WHITE_NOTES[w] <= note && (w + 1 == WHITE_NOTES.length || WHITE_NOTES[w + 1] > note)) {
-        return w * whiteWidth(width);
+        return w;
       }
     }
-    return 0;
+    return -1;
+  }
+
+  /** Left pixel edge of the white key holding `note`. */
+  static float leftOfNote(int note, int width) {
+    int w = whiteIndexOf(note);
+    return w < 0 ? 0 : w * whiteWidth(width);
   }
 
   static int keyNote(char keyChar, int octaveShift) {

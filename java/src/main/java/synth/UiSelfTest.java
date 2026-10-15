@@ -243,8 +243,35 @@ public final class UiSelfTest {
     Thread.sleep(80);
     scope.sample();
     check(scope.peak() > 0.01f, "scope sees a sustained note, peak " + scope.peak());
-    paintScope(scope, 900, ScopePanel.PREF_HEIGHT, "build/scope.png");
+    java.awt.image.BufferedImage wave =
+        paintScope(scope, 900, ScopePanel.PREF_HEIGHT, "build/scope.png");
+    check(bluePixels(wave) > 0, "wave mode paints, " + bluePixels(wave) + " px");
     paintScope(scope, KeyboardPanel.MIN_WIDTH, ScopePanel.MIN_HEIGHT, "build/scope-small.png");
+
+    // M8: per-key reverse waterfall. Columns must sit exactly over their keys.
+    scope.setMode(ScopePanel.Mode.WATERFALL);
+    check(scope.mode() == ScopePanel.Mode.WATERFALL, "waterfall mode selected");
+    scope.sample();
+    check(scope.columnLevel(60) > 0.01f, "column for the held note, level " + scope.columnLevel(60));
+    check(scope.columnLevel(61) == 0f, "no column for an unheld note");
+    check(scope.historyRows() == scope.getHeight(),
+        "one history row per pixel row, got " + scope.historyRows() + " of " + scope.getHeight());
+    int[][] sizes = {{900, ScopePanel.PREF_HEIGHT}, {420, 80}, {KeyboardPanel.MIN_WIDTH, ScopePanel.MIN_HEIGHT}};
+    for (int[] wh : sizes) {
+      SwingUtilities.invokeAndWait(() -> scope.setSize(wh[0], wh[1]));
+      for (int i = 0; i < 40; ++i) scope.sample();  // 40 rows of history at this size
+      java.awt.image.BufferedImage wf =
+          paintScope(scope, wh[0], wh[1], "build/waterfall-" + wh[0] + "x" + wh[1] + ".png");
+      int keyX = Math.round(KeyboardPanel.leftOfNote(60, wh[0]) + KeyboardPanel.whiteWidth(wh[0]) / 2f);
+      int otherX = Math.round(KeyboardPanel.leftOfNote(62, wh[0]) + KeyboardPanel.whiteWidth(wh[0]) / 2f);
+      check(isBlue(wf, keyX, wh[1] - 1), "waterfall column sits over key 60 at " + wh[0] + "x" + wh[1] + ", x=" + keyX);
+      check(!isBlue(wf, otherX, wh[1] - 1), "no waterfall column over the unheld key 62 at " + wh[0] + "x" + wh[1]);
+      int minPx = 30 * Math.max(1, Math.round(KeyboardPanel.whiteWidth(wh[0])));
+      check(bluePixels(wf) >= minPx,
+          "waterfall column is 30+ rows tall at " + wh[0] + "x" + wh[1] + ", " + bluePixels(wf) + " px (min " + minPx + ")");
+    }
+    scope.setMode(ScopePanel.Mode.WAVE);
+    check(scope.mode() == ScopePanel.Mode.WAVE, "wave mode selected again");
     for (int i = 0; i < 60; ++i) {
       scope.sample();
       Thread.sleep(16);
@@ -252,6 +279,9 @@ public final class UiSelfTest {
     check(Engine.underrunCount() == 0, "60 scope polls cause no underruns, got " + Engine.underrunCount());
     check(Engine.activeVoices() == 1, "note still sounding while the scope polls, got " + Engine.activeVoices());
     Engine.noteOff(60);
+    Thread.sleep(700);
+    scope.sample();
+    check(scope.columnLevel(60) == 0f, "column drains after the release, level " + scope.columnLevel(60));
     SwingUtilities.invokeAndWait(scope::stop);
     check(!scope.running(), "scope timer stops");
 
@@ -404,7 +434,9 @@ public final class UiSelfTest {
     return out[0];
   }
 
-  private static void paintScope(ScopePanel scope, int width, int height, String path) throws Exception {
+  private static java.awt.image.BufferedImage paintScope(ScopePanel scope, int width, int height,
+                                                         String path) throws Exception {
+    final java.awt.image.BufferedImage[] out = new java.awt.image.BufferedImage[1];
     SwingUtilities.invokeAndWait(() -> {
       scope.setSize(width, height);
       java.awt.image.BufferedImage img =
@@ -415,7 +447,23 @@ public final class UiSelfTest {
       } catch (java.io.IOException e) {
         throw new RuntimeException(e);
       }
+      out[0] = img;
     });
+    return out[0];
+  }
+
+  /** The blue used by both scope modes: blue clearly dominates red. Centre line and background do not. */
+  private static boolean isBlue(java.awt.image.BufferedImage img, int x, int y) {
+    int rgb = img.getRGB(x, y) & 0xFFFFFF;
+    return (rgb & 255) > ((rgb >> 16) & 255) + 30;
+  }
+
+  private static int bluePixels(java.awt.image.BufferedImage img) {
+    int n = 0;
+    for (int y = 0; y < img.getHeight(); ++y)
+      for (int x = 0; x < img.getWidth(); ++x)
+        if (isBlue(img, x, y)) ++n;
+    return n;
   }
 
   private static void renderPng(int width, int height, String path) throws Exception {
