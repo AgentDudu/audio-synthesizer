@@ -17,8 +17,15 @@ public final class Engine {
   public static native String start(int deviceId, int sampleRate, int bufferFrames);
 
   public static native void stop();
-  public static native void noteOn(int note, int velocity);
-  public static native void noteOff(int note);
+
+  // The C++ event ring is single-producer. The EDT (keyboard) and the MIDI receiver are both
+  // producers, so every note event serialises through these two wrappers (PLAN §9.4). The lock is
+  // held only across a ring push - no blocking, no allocation.
+  public static synchronized void noteOn(int note, int velocity) { nativeNoteOn(note, velocity); }
+  public static synchronized void noteOff(int note) { nativeNoteOff(note); }
+
+  private static native void nativeNoteOn(int note, int velocity);
+  private static native void nativeNoteOff(int note);
   public static native void setParam(int paramId, float value);
   public static native float getParam(int paramId);
 

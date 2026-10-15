@@ -31,6 +31,9 @@ class AudioEngine {
   void stop();
   bool running() const { return audio_.isStreamRunning(); }
 
+  // shortcut: a full 256-slot ring drops the event silently. Safe for human playing and MIDI-file
+  // playback (the callback drains every buffer, ~256 events per 5 ms of notes). Upgrade to a drop
+  // counter if a source can burst faster than one event per audio frame.
   void noteOn(int note, int vel) { queue_.push(NoteEvent{note, vel}); }
   void noteOff(int note) { queue_.push(NoteEvent{note, 0}); }
 
