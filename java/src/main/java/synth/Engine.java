@@ -41,6 +41,9 @@ public final class Engine {
   public static native long underrunCount();
   public static native int activeVoices();
 
+  /** Buffer size the stream actually opened with (RtAudio may adjust the request); 0 when closed. */
+  public static native int bufferFrames();
+
   /** First device id marked DEFAULT-OUT in probeDevices(), or -1. */
   public static int defaultOutputDeviceId() {
     for (Device d : parseDevices(probeDevices())) {

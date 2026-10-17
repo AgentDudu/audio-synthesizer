@@ -285,7 +285,7 @@ public final class UiSelfTest {
     SwingUtilities.invokeAndWait(scope::stop);
     check(!scope.running(), "scope timer stops");
 
-    System.out.println("devices");
+    System.out.println("output");
     String report = "rtaudio 6.0.1 api=7\ndevices=3\n"
         + "  id=129 24E3 (NVIDIA High Definition Audio) out=2 in=0 rate=48000\n"
         + "  id=137 Mic in at rear panel (Pink) (Realtek High Definition Audio) out=0 in=2 rate=192000\n"
@@ -298,10 +298,10 @@ public final class UiSelfTest {
     check(parsed.get(1).defaultOut() && parsed.get(1).rate() == 192000 && !parsed.get(0).defaultOut(),
         "default flag and rate parse");
 
-    final DevicePanel[] panelBox = new DevicePanel[1];
+    final OutputPanel[] panelBox = new OutputPanel[1];
     SwingUtilities.invokeAndWait(
-        () -> panelBox[0] = new DevicePanel(App.SAMPLE_RATE, App.BUFFER_FRAMES));
-    DevicePanel panel = panelBox[0];
+        () -> panelBox[0] = new OutputPanel(App.SAMPLE_RATE, App.BUFFER_FRAMES));
+    OutputPanel panel = panelBox[0];
     Engine.Device def = panel.current();
     check(panel.devices().size() >= 2, "this machine exposes " + panel.devices().size() + " output endpoints");
     check(def != null && def.defaultOut(), "the picker starts on the default output device, id "
@@ -339,6 +339,24 @@ public final class UiSelfTest {
     Thread.sleep(700);
     check(Engine.underrunCount() == underrunsBefore,
         "device switching causes no underruns, got " + Engine.underrunCount());
+
+    System.out.println("buffer size");
+    check(panel.currentFrames() == App.BUFFER_FRAMES,
+        "the panel tracks the requested size, " + panel.currentFrames());
+    for (int frames : OutputPanel.BUFFER_CHOICES) {
+      long before = Engine.underrunCount();
+      check(panel.setBuffer(frames), "asked for " + frames + " frames, stream opened "
+          + Engine.bufferFrames() + " frames");
+      Engine.noteOn(60, 100);
+      Thread.sleep(120);
+      check(Engine.activeVoices() == 1, frames + " frames renders notes, voices " + Engine.activeVoices());
+      Engine.noteOff(60);
+      Thread.sleep(700);
+      check(Engine.underrunCount() == before,
+          frames + " frames causes no underruns, got " + (Engine.underrunCount() - before));
+    }
+    check(panel.setBuffer(App.BUFFER_FRAMES), "back to " + App.BUFFER_FRAMES + " frames");
+    check(panel.current().equals(def), "the buffer change kept the same endpoint, id " + panel.current().id());
 
     System.out.println("midi");
     check(MidiIn.translate(new ShortMessage(0x90, 60, 100), MidiIn.ALL_CHANNELS).equals(new MidiIn.Note(60, 100)),
@@ -459,6 +477,7 @@ public final class UiSelfTest {
     check(Engine.underrunCount() == 0, "two producers cause no underruns, got " + Engine.underrunCount());
 
     Engine.stop();
+    check(Engine.bufferFrames() == 0, "a closed stream reports no buffer size");
 
     System.out.println(failures == 0 ? "UI self-test OK" : "UI self-test FAILURES=" + failures);
     System.exit(failures == 0 ? 0 : 1);

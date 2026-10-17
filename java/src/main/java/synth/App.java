@@ -73,7 +73,7 @@ public final class App {
       waterfall.addActionListener(e -> scope.setMode(
           waterfall.isSelected() ? ScopePanel.Mode.WATERFALL : ScopePanel.Mode.WAVE));
       JPanel stripHead = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
-      stripHead.add(new DevicePanel(SAMPLE_RATE, BUFFER_FRAMES));
+      stripHead.add(new OutputPanel(SAMPLE_RATE, BUFFER_FRAMES));
       stripHead.add(waterfall);
       JPanel strip = new JPanel(new BorderLayout());
       strip.add(stripHead, BorderLayout.NORTH);
