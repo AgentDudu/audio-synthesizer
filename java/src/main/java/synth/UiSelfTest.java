@@ -285,6 +285,61 @@ public final class UiSelfTest {
     SwingUtilities.invokeAndWait(scope::stop);
     check(!scope.running(), "scope timer stops");
 
+    System.out.println("devices");
+    String report = "rtaudio 6.0.1 api=7\ndevices=3\n"
+        + "  id=129 24E3 (NVIDIA High Definition Audio) out=2 in=0 rate=48000\n"
+        + "  id=137 Mic in at rear panel (Pink) (Realtek High Definition Audio) out=0 in=2 rate=192000\n"
+        + "  id=132 Speakers (Realtek High Definition Audio) out=2 in=0 rate=192000 DEFAULT-OUT\n";
+    java.util.List<Engine.Device> parsed = Engine.parseDevices(report);
+    check(parsed.size() == 2, "parse drops the input-only endpoint, got " + parsed.size());
+    check(parsed.get(0).id() == 129 && parsed.get(1).id() == 132, "device ids parse");
+    check(parsed.get(0).name().equals("24E3 (NVIDIA High Definition Audio)"),
+        "device name with spaces and parens parses, got " + parsed.get(0).name());
+    check(parsed.get(1).defaultOut() && parsed.get(1).rate() == 192000 && !parsed.get(0).defaultOut(),
+        "default flag and rate parse");
+
+    final DevicePanel[] panelBox = new DevicePanel[1];
+    SwingUtilities.invokeAndWait(
+        () -> panelBox[0] = new DevicePanel(App.SAMPLE_RATE, App.BUFFER_FRAMES));
+    DevicePanel panel = panelBox[0];
+    Engine.Device def = panel.current();
+    check(panel.devices().size() >= 2, "this machine exposes " + panel.devices().size() + " output endpoints");
+    check(def != null && def.defaultOut(), "the picker starts on the default output device, id "
+        + (def == null ? "?" : def.id()));
+    long underrunsBefore = Engine.underrunCount();
+    Engine.noteOn(60, 100);
+    Thread.sleep(80);
+    int applied = 0, refused = 0;
+    for (Engine.Device d : panel.devices()) {
+      if (d.equals(def)) continue;
+      if (panel.apply(d)) {
+        if (applied == 0) {  // prove the new stream really renders, once
+          Engine.noteOff(60);
+          Thread.sleep(700);
+          Engine.noteOn(64, 100);
+          Thread.sleep(120);
+          check(Engine.activeVoices() == 1,
+              "the stream on id " + d.id() + " renders notes, voices " + Engine.activeVoices());
+          Engine.noteOff(64);
+          Thread.sleep(700);
+        }
+        ++applied;
+      } else {
+        check(panel.current().equals(def), "id " + d.id() + " refused to open and the picker snapped back");
+        ++refused;
+      }
+    }
+    check(applied >= 1, applied + " other endpoints opened, " + refused + " refused");
+    check(panel.apply(def), "switched back to the default endpoint");
+    check(panel.current().equals(def), "the picker shows the live device, id " + panel.current().id());
+    Engine.noteOn(60, 100);
+    Thread.sleep(120);
+    check(Engine.activeVoices() == 1, "the default endpoint still renders, voices " + Engine.activeVoices());
+    Engine.noteOff(60);
+    Thread.sleep(700);
+    check(Engine.underrunCount() == underrunsBefore,
+        "device switching causes no underruns, got " + Engine.underrunCount());
+
     System.out.println("midi");
     check(MidiIn.translate(new ShortMessage(0x90, 60, 100), MidiIn.ALL_CHANNELS).equals(new MidiIn.Note(60, 100)),
         "note-on parses with velocity");
