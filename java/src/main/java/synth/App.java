@@ -14,6 +14,8 @@ import javax.swing.SwingUtilities;
 import javax.swing.WindowConstants;
 
 public final class App {
+  static final int SAMPLE_RATE = 48000, BUFFER_FRAMES = 512;
+
   public static void main(String[] args) throws Exception {
     String mode = args.length > 0 ? args[0] : "ui";
     if (mode.equals("probe")) {
@@ -38,7 +40,7 @@ public final class App {
       System.err.println("no default output device");
       System.exit(1);
     }
-    String err = Engine.start(device, 48000, 512);
+    String err = Engine.start(device, SAMPLE_RATE, BUFFER_FRAMES);
     if (err != null) {
       System.err.println("audio start failed: " + err);
       System.exit(1);
@@ -47,9 +49,8 @@ public final class App {
     SwingUtilities.invokeLater(() -> {
       JFrame frame = new JFrame("Audio Synthesizer");
       KeyboardPanel keys = new KeyboardPanel();
-      JLabel status = new JLabel("device " + device + " @ 48000 Hz / 512 frames"
-          + "   A0-C8 on screen   computer keys: a w s e d f t g y h u j k   arrows: octave"
-          + "   esc: all notes off");
+      JLabel status = new JLabel("A0-C8 on screen   computer keys: a w s e d f t g y h u j k"
+          + "   arrows: octave   esc: all notes off");
       KnobPanel knobs = new KnobPanel();
       ScopePanel scope = new ScopePanel();
       JToggleButton waterfall = new JToggleButton("waterfall");
@@ -57,6 +58,7 @@ public final class App {
       waterfall.addActionListener(e -> scope.setMode(
           waterfall.isSelected() ? ScopePanel.Mode.WATERFALL : ScopePanel.Mode.WAVE));
       JPanel stripHead = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+      stripHead.add(new DevicePanel(SAMPLE_RATE, BUFFER_FRAMES));
       stripHead.add(waterfall);
       JPanel strip = new JPanel(new BorderLayout());
       strip.add(stripHead, BorderLayout.NORTH);
@@ -116,7 +118,7 @@ public final class App {
   /** Headless self-check: start the stream, play four notes, report underruns, bounce a WAV. */
   private static void smoke() throws Exception {
     System.out.println("default output device id = " + Engine.defaultOutputDeviceId());
-    String err = Engine.start(Engine.defaultOutputDeviceId(), 48000, 512);
+    String err = Engine.start(Engine.defaultOutputDeviceId(), SAMPLE_RATE, BUFFER_FRAMES);
     if (err != null) {
       System.err.println("start failed: " + err);
       System.exit(1);
