@@ -40,6 +40,8 @@ class AudioEngine {
   void setParam(int id, float v) { synth_.setParam(id, v); }
   float getParam(int id) const { return synth_.getParam(id); }
   int activeVoices() const { return activeVoices_.load(std::memory_order_relaxed); }
+  // The buffer size the stream actually opened with (RtAudio may adjust the request), 0 when closed.
+  unsigned bufferFrames() const { return bufferFrames_.load(std::memory_order_relaxed); }
   unsigned long long underruns() const { return underruns_.load(std::memory_order_relaxed); }
 
   // shortcut: scope taps a non-atomic ring; a torn sample is visually irrelevant.
@@ -67,6 +69,7 @@ class AudioEngine {
   float scope_[kScopeSize]{};
   std::atomic<unsigned> scopePos_{0};
   std::atomic<unsigned> activeVoices_{0};
+  std::atomic<unsigned> bufferFrames_{0};
   // -1 in voiceNote_ means the slot is free. Written once per audio block, read by JNI.
   std::atomic<int> voiceNote_[Synth::kVoices]{};
   std::atomic<float> voiceLevel_[Synth::kVoices]{};

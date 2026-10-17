@@ -88,6 +88,8 @@ bool AudioEngine::start(unsigned deviceId, unsigned sampleRate, unsigned bufferF
     return false;
   }
   fs_.store(static_cast<float>(sampleRate), std::memory_order_relaxed);
+  // RtAudio rewrites the buffer size it actually opened with - show that, not what we asked for.
+  bufferFrames_.store(frames, std::memory_order_relaxed);
 
   e = audio_.startStream();
   if (e != RTAUDIO_NO_ERROR) {
@@ -102,6 +104,7 @@ void AudioEngine::stop() {
   if (!audio_.isStreamOpen()) return;
   if (audio_.isStreamRunning()) audio_.abortStream();
   audio_.closeStream();
+  bufferFrames_.store(0, std::memory_order_relaxed);
 }
 
 int AudioEngine::copyScope(float *dst, int n) const {

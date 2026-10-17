@@ -3,9 +3,12 @@
 Java (Swing) UI ⇄ JNI ⇄ C++ audio engine (RtAudio). Windows-first, designed so Linux/macOS
 later is a CMake flag change, not a rewrite.
 
-Status: **v0.2.0 on `main`** — 88-key piano (A0-C8) with mouse + computer keys that scales with the
-window, eight live param sliders, live scope. `main` `d87f3d6` (tag `v0.2.0`), `develop` tracks it.
-Next: polish (M6 — device picker, buffer size, quit cleanup, README).
+Status: **v0.5.0 on `main`** — 88-key piano (A0-C8) with mouse + computer keys that scales with the
+window, eight live param sliders, a scope strip that toggles between the waveform and a per-key
+reverse waterfall, MIDI-file input that lights the keys, output-device and buffer-size pickers, and
+a window close that is proven to stop the audio thread and exit. `main` takes `v0.5.0` from
+`release/0.5.0`; `develop` tracks it.
+Next: M7 *(optional)* — polyBLEP, stereo voices, delay — or whatever gets pointed at.
 
 ---
 
@@ -137,7 +140,7 @@ audio-synthesizer/
     App.java            Engine.java        # Engine = all `native` declarations + loadLibrary
     KeyboardPanel.java                     # done: full 88-key piano, mouse + computer keys
     UiSelfTest.java                        # done: headless UI check + keyboard PNG render
-    KnobPanel.java  ScopePanel.java  MidiIn.java          # M3 / M4
+    KnobPanel.java  ScopePanel.java  MidiIn.java          # M3 / M4 / M8 (scope modes)
 ```
 
 ---
@@ -154,13 +157,16 @@ public final class Engine {
     public static int defaultOutputDeviceId();   // pure Java, parses probeDevices()
 
     // Methods returning String: null = success, non-null = error text. No exceptions across JNI.
-    public static native String start(int deviceId, int sampleRate, int bufferFrames);
+    // start/stop/noteOn/noteOff are Java wrappers (synchronized, §8.9) over private natives;
+    // start reports failure as IOException, not a String.
+    public static boolean start(int deviceId, int sampleRate, int bufferFrames) throws IOException;
     public static native void stop();
     public static native void noteOn(int note, int velocity);   // MIDI channel is filtered in Java
     public static native void noteOff(int note);
     public static native void setParam(int paramId, float value);
     public static native float getParam(int paramId);
     public static native int getScope(float[] out);              // last out.length frames
+    public static native int getVoiceLevels(int[] notes, float[] levels); // M8: active voices' note + env level
     public static native String renderWav(String path, double seconds, int[] notes, int[] vels);
     public static native long underrunCount();
     public static native int activeVoices();
@@ -264,7 +270,8 @@ Targets: `-Target probe` (device report) | `smoke` (headless engine check + WAV 
 | **M4a** ✅ | MIDI-in adapter: one `Receiver` → `Engine.noteOn/Off`, plus a **built-in MIDI-file source** (`Sequencer.getTransmitter()`) | **Passed 2026-10-16**: `MidiIn.translate()` is pure, so synthetic `ShortMessage`s and the file source run the same parsing. `UiSelfTest`: note-on/off parsing, velocity-0 note-on treated as note-off, channel filter both ways, control change ignored; a 5-note `.mid` written by the test (`build/test.mid`) emits exactly 10 events with the right notes and velocities (100/60/127/1/90); played through the live engine it drives voices and leaves 0 stuck voices, `underruns == 0`. Two threads firing 200 events each through the wrappers drain to 0 voices with no underruns — the C++ ring stays single-producer because `Engine.noteOn/noteOff` are now `synchronized` wrappers over private natives (§9.4). MIDI notes light the on-screen keyboard via a separate `remote` set, so focus loss and Esc never silence a file that is still playing; a pixel check counts 1897 lit px with a remote note lit vs 0 without. |
 | **M4b** *(optional)* | Real MIDI device in (hardware controller, or VMPK + loopMIDI virtual cable) | Device appears in `MidiSystem.getMidiDeviceInfo()` re-scan; live playing works; MIDI + on-screen keyboard coexist. |
 | **M5** ✅ | Scope panel (WAV export already shipped with M1) | **Passed 2026-10-16**: `ScopePanel` polls the engine's 1024-sample ring on a 16 ms Swing `Timer` (~60 fps) and paints it auto-scaled. `UiSelfTest`: silence reads flat, a sustained note peaks 0.22, 60 polls cause `underruns == 0` while the note keeps sounding, the timer stops on window close, and the trace paints at 900x120 (1550 wave px) and 320x40 (623 wave px). |
-| **M6** | Polish: device picker, buffer-size control, quit-cleanup, README | Clean exit with no orphan stream; README has build+run for a stranger. |
+| **M8** ✅ | Scope mode toggle: `wave` (today) vs per-key **reverse waterfall** above the keyboard | **Passed 2026-10-16** (PR #10): `engine_tests` — the voice snapshot is empty before any note, reports note 60 at level 0.3578 mid-attack, keeps rising through the attack, shows both notes when two are held, and is empty after the release. `UiSelfTest` (158 checks) — column level 0.83 for the held note, 0 for an unheld one, 0.0 after release; the column sits over key 60 at 900x120 / 420x80 / 320x40 (x=407/190/145) and not over key 62; the column is 40 rows tall (680/320/240 px); wave mode still paints (4220 px); `underruns == 0` across every poll. Deviation from §6.2: `Adsr::level` was already a public field and the constant is `Synth::kVoices`, so no `level()` accessor and no `kMaxVoices`. |
+| **M6** ✅ | Polish: device picker, buffer-size control, quit-cleanup, README | **Passed 2026-10-16** (PRs #12-#15): `OutputPanel` lists only output endpoints (`Engine.parseDevices` drops input-only ones) and names the device plus the buffer size that **actually** opened (`Engine.bufferFrames()`, the value RtAudio leaves in its out-param). Self-test: 8 endpoints on this machine, the picker starts on the default, all 7 others opened and each rendered a note, `underruns` unchanged across 8 stream restarts; 128/256/512/1024 each opened exactly as asked, rendered a note, and caused **0 underruns**. Quit cleanup: `synth.App close` opens the real UI with a `.mid` playing, dispatches `WINDOW_CLOSING`, and must exit unaided — asserted by `build.ps1`, and the assertion bites (commenting `scope.stop()` out gives `HUNG: process did not exit`). README documents build, run, play, modes, layout. UI self-test **186 checks, 0 fail**. Not covered: the 128-vs-1024 latency A/B is a human ear, and no endpoint refused here so the revert branch of `restart()` is untested. |
 | **M7** *(optional)* | polyBLEP oscillators, stereo voices, simple delay | Aliasable saw sounds audibly cleaner A/B against M6 build. |
 
 ---
@@ -290,6 +297,51 @@ improvements but still ships no virtual cable.
 Do **not** bother with: phone-as-controller over network MIDI (Windows network-MIDI support is weak),
 or `MidiSystem.getTransmitter()` as the default path — it throws `MidiUnavailableException` when no
 input device exists, which is exactly this machine's current state.
+
+### 6.2 M8 — scope mode toggle: wave vs per-key reverse waterfall
+
+Pulled ahead of M6 by the user. The strip above the keyboard gets a toggle. `wave` is today's
+oscilloscope. `waterfall` is one column per key, aligned with the key under it: the newest row sits at
+the keyboard edge and history scrolls up and away. Column brightness = how loud that note is now.
+
+**Native — the only C++ change.** `Voice` knows its `note()`, but its envelope level is only reachable
+through `render()`, and the audio thread owns those fields. So the callback snapshots per-voice state
+into atomics next to the scope ring:
+
+```cpp
+std::atomic<int>   voiceNote_[kMaxVoices];
+std::atomic<float> voiceLevel_[kMaxVoices];
+```
+
+written **once per block** (16 slots, not per sample) and read by
+`getVoiceLevels(int[] notes, float[] levels)` → number of active voices. `Adsr` gains a
+`level() const` accessor. Race-free by construction, same trick as the scope ring (§8.14).
+
+**Java.** `ScopePanel` keeps its single 16 ms timer and gains `setMode(WAVE | WATERFALL)`:
+- poll `getVoiceLevels` and fold it into `float[88] col` (note 21..108 → index), `max()` when two
+  voices share a column
+- push `col` into a history ring of `rows × 88` floats, `rows` = panel height, so one row per pixel
+  row: ~120 rows ≈ 1.9 s at 16 ms
+- paint rows bottom-up (y = height-1 is newest), brightness from level, blue ramp; column x comes from
+  `KeyboardPanel`'s geometry helpers (`whiteWidth`, `leftOfNote`, `blackLeft`, `blackWidth`) so a
+  column sits exactly over its key at every window size
+- notes outside A0–C8 get no column — the keyboard's rule already
+
+**Toggle.** one `JToggleButton("waterfall")` in a one-line header above the strip. `ScopePanel` is the
+only thing that changes mode; keyboard, knobs and MIDI path stay untouched.
+
+**Acceptance.**
+- `engine_tests`: `noteOn(60)` + `renderBlock` → one active voice, note 60, level > 0 and rising
+  through the attack; after `noteOff` + `renderBlock` → zero active. Deterministic offline synth, no
+  wall clock.
+- `UiSelfTest`: `col(57) > 0` after key `a`; the column decays to 0 after release; waterfall mode
+  paints lit pixels for a held note and none when silent (pixel proof, as with the key lights); the
+  toggle switches mode and both modes paint; the column x for notes 21/60/108 equals the key x at
+  three window sizes (reuse the existing geometry assertions).
+- `underruns == 0` with the extra per-frame read (32 atomic loads + one JNI copy — R9).
+
+**Risks.** R9 (EDT poll — bounded and tiny). `max()` hides two-voice detail inside one column
+(documented, not a bug). History length tracks window height, not wall time.
 
 ---
 
@@ -350,6 +402,16 @@ input device exists, which is exactly this machine's current state.
     offline tests link `synth_core`, so they never pull in `jvm.lib` and need no JVM to run.
 13. **`build.ps1` pins the toolchain** to `C:/Strawberry/c/bin` (g++ 13.2 + CMake 3.29). Two MinGW
     installs are on PATH; unpinned, the build silently picks g++ 15.2 + CMake 4.3.
+14. **Waterfall columns read a per-block atomic snapshot, not the live voices.** The audio callback
+    writes `voiceNote_[16]` / `voiceLevel_[16]` once per block and JNI reads those. Reading `Voice`
+    fields directly would be a data race on plain `int`/`float`. Cost: 32 relaxed atomics per
+    512-frame block, no lock, nothing added to the per-sample path.
+15. **A waterfall column is the max level of the voices holding that note.** Voice stealing can put
+    two notes in one column; `max()` keeps it honest about loudness instead of flickering between
+    them.
+16. **The waterfall scrolls up from the keyboard edge** — newest row at the keys, history leaving
+    through the top — because the strip sits above the keys. History length is measured in pixel rows,
+    not seconds, so a taller window shows more history. Deliberate.
 
 ## 9. Explicitly out of scope for v1
 
@@ -395,8 +457,10 @@ gh pr create --base develop --head feature/resize-keyboard   # evidence goes in 
 gh pr merge --merge --delete-branch                          # only after the user approves
 ```
 
-Current state (2026-10-15): `develop` `03ce54e`, `main` `b356b3c` (merge of `develop`, pushed).
-PRs #1 (keyboard), #2 (88 keys), #3 (resize) merged. **No tag exists yet** — `main` has content but
-the `v0.1.0` release tag was never cut, so the "every merge to `main` gets a tag" rule is currently
-broken by us, not by the plan. M0/M1 commits predate the message rules and stay as they are — no
-history rewrite on pushed branches.
+Current state (2026-10-16): `release/0.5.0` cut from `develop` `b846a63` and merged to `main` as
+`v0.5.0`; `develop` then takes the back-merge. Tags `v0.1.0` (`b356b3c`), `v0.2.0` (`d87f3d6`),
+`v0.3.0` (`f676390`) and `v0.4.0` (`b3cf2a7`) exist, so the "every merge to `main` gets a tag" rule
+holds; the earlier gap was closed by cutting `v0.1.0` retroactively at the commit that was already on
+`main`. PRs #1-#15 merged. No `release/*` branch survives on origin — deleting a remote ref is
+blocked by the agent's safety net, so the user removed them by hand. M0/M1 commits predate the
+message rules and stay as they are — no history rewrite on pushed branches.

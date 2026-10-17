@@ -41,11 +41,43 @@ public final class Engine {
   public static native long underrunCount();
   public static native int activeVoices();
 
+  /** Buffer size the stream actually opened with (RtAudio may adjust the request); 0 when closed. */
+  public static native int bufferFrames();
+
   /** First device id marked DEFAULT-OUT in probeDevices(), or -1. */
   public static int defaultOutputDeviceId() {
-    for (String line : probeDevices().split("\n")) {
-      if (line.contains("DEFAULT-OUT")) return Integer.parseInt(line.trim().split(" ")[0].substring(3));
+    for (Device d : parseDevices(probeDevices())) {
+      if (d.defaultOut()) return d.id();
     }
     return -1;
+  }
+
+  /** One playable output endpoint. `id` is an RtAudio id, not a 0-based index. */
+  public record Device(int id, String name, int rate, boolean defaultOut) {
+    @Override
+    public String toString() {
+      return "id " + id + "  " + name + "  (" + rate + " Hz)" + (defaultOut ? "  [default]" : "");
+    }
+  }
+
+  /**
+   * Output devices from a probeDevices() report, input-only endpoints dropped. Parsing lives here so
+   * the format has one reader and the picker can be tested without touching a device (R10).
+   */
+  public static java.util.List<Device> parseDevices(String report) {
+    java.util.List<Device> out = new java.util.ArrayList<>();
+    for (String line : report.split("\n")) {
+      String s = line.trim();
+      if (!s.startsWith("id=")) continue;
+      int space = s.indexOf(' ', 3);
+      int id = Integer.parseInt(s.substring(3, space));
+      int o = s.indexOf(" out="), r = s.indexOf(" rate=");
+      if (o < 0 || r < 0) continue;
+      if (Integer.parseInt(s.substring(o + 5, s.indexOf(' ', o + 5))) == 0) continue;
+      int end = s.indexOf(' ', r + 6);
+      int rate = Integer.parseInt(s.substring(r + 6, end < 0 ? s.length() : end));
+      out.add(new Device(id, s.substring(space + 1, o).trim(), rate, s.contains("DEFAULT-OUT")));
+    }
+    return out;
   }
 }
