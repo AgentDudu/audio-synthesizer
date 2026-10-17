@@ -3,11 +3,12 @@
 Java (Swing) UI ⇄ JNI ⇄ C++ audio engine (RtAudio). Windows-first, designed so Linux/macOS
 later is a CMake flag change, not a rewrite.
 
-Status: **v0.4.0 on `main`** — 88-key piano (A0-C8) with mouse + computer keys that scales with the
+Status: **v0.5.0 on `main`** — 88-key piano (A0-C8) with mouse + computer keys that scales with the
 window, eight live param sliders, a scope strip that toggles between the waveform and a per-key
-reverse waterfall, and MIDI-file input that lights the keys. `main` `b3cf2a7` (tag `v0.4.0`),
-`develop` tracks it.
-Next: polish (M6 — device picker, buffer size, quit cleanup, README), still paused by the user.
+reverse waterfall, MIDI-file input that lights the keys, output-device and buffer-size pickers, and
+a window close that is proven to stop the audio thread and exit. `main` takes `v0.5.0` from
+`release/0.5.0`; `develop` tracks it.
+Next: M7 *(optional)* — polyBLEP, stereo voices, delay — or whatever gets pointed at.
 
 ---
 
@@ -270,7 +271,7 @@ Targets: `-Target probe` (device report) | `smoke` (headless engine check + WAV 
 | **M4b** *(optional)* | Real MIDI device in (hardware controller, or VMPK + loopMIDI virtual cable) | Device appears in `MidiSystem.getMidiDeviceInfo()` re-scan; live playing works; MIDI + on-screen keyboard coexist. |
 | **M5** ✅ | Scope panel (WAV export already shipped with M1) | **Passed 2026-10-16**: `ScopePanel` polls the engine's 1024-sample ring on a 16 ms Swing `Timer` (~60 fps) and paints it auto-scaled. `UiSelfTest`: silence reads flat, a sustained note peaks 0.22, 60 polls cause `underruns == 0` while the note keeps sounding, the timer stops on window close, and the trace paints at 900x120 (1550 wave px) and 320x40 (623 wave px). |
 | **M8** ✅ | Scope mode toggle: `wave` (today) vs per-key **reverse waterfall** above the keyboard | **Passed 2026-10-16** (PR #10): `engine_tests` — the voice snapshot is empty before any note, reports note 60 at level 0.3578 mid-attack, keeps rising through the attack, shows both notes when two are held, and is empty after the release. `UiSelfTest` (158 checks) — column level 0.83 for the held note, 0 for an unheld one, 0.0 after release; the column sits over key 60 at 900x120 / 420x80 / 320x40 (x=407/190/145) and not over key 62; the column is 40 rows tall (680/320/240 px); wave mode still paints (4220 px); `underruns == 0` across every poll. Deviation from §6.2: `Adsr::level` was already a public field and the constant is `Synth::kVoices`, so no `level()` accessor and no `kMaxVoices`. |
-| **M6** | Polish: device picker, buffer-size control, quit-cleanup, README | Clean exit with no orphan stream; README has build+run for a stranger. |
+| **M6** ✅ | Polish: device picker, buffer-size control, quit-cleanup, README | **Passed 2026-10-16** (PRs #12-#15): `OutputPanel` lists only output endpoints (`Engine.parseDevices` drops input-only ones) and names the device plus the buffer size that **actually** opened (`Engine.bufferFrames()`, the value RtAudio leaves in its out-param). Self-test: 8 endpoints on this machine, the picker starts on the default, all 7 others opened and each rendered a note, `underruns` unchanged across 8 stream restarts; 128/256/512/1024 each opened exactly as asked, rendered a note, and caused **0 underruns**. Quit cleanup: `synth.App close` opens the real UI with a `.mid` playing, dispatches `WINDOW_CLOSING`, and must exit unaided — asserted by `build.ps1`, and the assertion bites (commenting `scope.stop()` out gives `HUNG: process did not exit`). README documents build, run, play, modes, layout. UI self-test **186 checks, 0 fail**. Not covered: the 128-vs-1024 latency A/B is a human ear, and no endpoint refused here so the revert branch of `restart()` is untested. |
 | **M7** *(optional)* | polyBLEP oscillators, stereo voices, simple delay | Aliasable saw sounds audibly cleaner A/B against M6 build. |
 
 ---
@@ -456,10 +457,10 @@ gh pr create --base develop --head feature/resize-keyboard   # evidence goes in 
 gh pr merge --merge --delete-branch                          # only after the user approves
 ```
 
-Current state (2026-10-16): `main` `b3cf2a7` (tag `v0.4.0`), `develop` `9426ae0` — same content,
-back-merge after each release as the model requires. Tags `v0.1.0` (`b356b3c`), `v0.2.0` (`d87f3d6`),
-`v0.3.0` (`f676390`) and `v0.4.0` exist, so the "every merge to `main` gets a tag" rule holds; the
-earlier gap was closed by cutting `v0.1.0` retroactively at the commit that was already on `main`.
-PRs #1-#10 merged. No `release/*` branch survives on origin — deleting a remote ref is blocked by the
-agent's safety net, so the user removed them by hand. M0/M1 commits predate the message rules and
-stay as they are — no history rewrite on pushed branches.
+Current state (2026-10-16): `release/0.5.0` cut from `develop` `b846a63` and merged to `main` as
+`v0.5.0`; `develop` then takes the back-merge. Tags `v0.1.0` (`b356b3c`), `v0.2.0` (`d87f3d6`),
+`v0.3.0` (`f676390`) and `v0.4.0` (`b3cf2a7`) exist, so the "every merge to `main` gets a tag" rule
+holds; the earlier gap was closed by cutting `v0.1.0` retroactively at the commit that was already on
+`main`. PRs #1-#15 merged. No `release/*` branch survives on origin — deleting a remote ref is
+blocked by the agent's safety net, so the user removed them by hand. M0/M1 commits predate the
+message rules and stay as they are — no history rewrite on pushed branches.
