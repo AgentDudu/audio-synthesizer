@@ -457,8 +457,8 @@ gh pr create --base develop --head feature/resize-keyboard   # evidence goes in 
 gh pr merge --merge --delete-branch                          # only after the user approves
 ```
 
-Current state (2026-10-16): `release/0.5.0` cut from `develop` `b846a63` and merged to `main` as
-`v0.5.0`; `develop` then takes the back-merge. Tags `v0.1.0` (`b356b3c`), `v0.2.0` (`d87f3d6`),
+Current state (2026-10-16): `main` `c71e122` (tag `v0.5.0`), cut as `release/0.5.0` from `develop`
+`b846a63`; `develop` is the back-merge of `main`, so both hold the same content. Tags `v0.1.0` (`b356b3c`), `v0.2.0` (`d87f3d6`),
 `v0.3.0` (`f676390`) and `v0.4.0` (`b3cf2a7`) exist, so the "every merge to `main` gets a tag" rule
 holds; the earlier gap was closed by cutting `v0.1.0` retroactively at the commit that was already on
 `main`. PRs #1-#15 merged. No `release/*` branch survives on origin — deleting a remote ref is
