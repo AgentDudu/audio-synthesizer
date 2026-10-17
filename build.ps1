@@ -32,4 +32,13 @@ if ($Target -eq 'test') {
     if ($LASTEXITCODE -ne 0) { throw "ctest failed" }
     java "-Djava.library.path=$PSScriptRoot/build/native" -cp build/classes synth.UiSelfTest
     if ($LASTEXITCODE -ne 0) { throw "UI self-test failed" }
+    # Quit cleanup: once the window closes the process must exit by itself, or something is still
+    # holding a thread or the audio stream. WaitForExit's timeout is the assertion; Start-Process
+    # gives no ExitCode for java here, so stderr is the crash check.
+    $closer = Start-Process java -PassThru -NoNewWindow -RedirectStandardError build/close-err.txt `
+        -ArgumentList "-Djava.library.path=$PSScriptRoot/build/native", '-cp', 'build/classes', 'synth.App', 'close'
+    if (-not $closer.WaitForExit(30000)) { $closer.Kill(); throw 'closing the window did not exit the process' }
+    if ((Get-Item build/close-err.txt).Length -gt 0) {
+        throw 'closing the window printed errors: ' + (Get-Content build/close-err.txt -Raw)
+    }
 }
