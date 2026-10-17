@@ -26,6 +26,17 @@ public final class App {
       smoke();
       return;
     }
+    if (mode.equals("close")) {
+      // Quit-cleanup proof: open the UI, close the window, and let the JVM exit on its own.
+      // build.ps1 fails if this process is still alive a few seconds later. A .mid from the
+      // self-test is played first, so the sequencer thread has to die too.
+      String mid = new java.io.File("build/test.mid").isFile() ? "build/test.mid" : null;
+      JFrame frame = ui(mid);
+      Thread.sleep(500);
+      SwingUtilities.invokeAndWait(() -> frame.dispatchEvent(
+          new WindowEvent(frame, WindowEvent.WINDOW_CLOSING)));
+      return;
+    }
     ui();
   }
 
@@ -34,7 +45,10 @@ public final class App {
     System.out.println(Engine.probeDevices());
   }
 
-  private static void ui() {
+  private static JFrame ui() throws Exception { return ui(null); }
+
+  /** @param midiFile played as soon as the window is up, so quitting can be proven with a file running. */
+  private static JFrame ui(String midiFile) throws Exception {
     int device = Engine.defaultOutputDeviceId();
     if (device < 0) {
       System.err.println("no default output device");
@@ -46,7 +60,8 @@ public final class App {
       System.exit(1);
     }
 
-    SwingUtilities.invokeLater(() -> {
+    final JFrame[] box = new JFrame[1];
+    SwingUtilities.invokeAndWait(() -> {
       JFrame frame = new JFrame("Audio Synthesizer");
       KeyboardPanel keys = new KeyboardPanel();
       JLabel status = new JLabel("A0-C8 on screen   computer keys: a w s e d f t g y h u j k"
@@ -95,6 +110,13 @@ public final class App {
       midiRow.add(midiOpen);
       midiRow.add(midiStop);
       south.add(midiRow, BorderLayout.WEST);
+      if (midiFile != null) {
+        try {
+          player[0] = MidiIn.playFile(midiFile, MidiIn.ALL_CHANNELS, keys);
+        } catch (Exception ex) {
+          throw new IllegalStateException("close-test could not play " + midiFile, ex);
+        }
+      }
 
       frame.setLayout(new BorderLayout());
       frame.add(center, BorderLayout.CENTER);
@@ -103,16 +125,27 @@ public final class App {
       frame.addWindowListener(new WindowAdapter() {
         @Override
         public void windowClosing(WindowEvent e) {
-          MidiIn.closeQuietly(player[0]);
-          scope.stop();  // otherwise the 60 fps timer keeps the EDT alive after dispose
-          Engine.stop();
+          cleanup(player[0], scope);
         }
       });
       frame.pack();
       frame.setLocationByPlatform(true);
       frame.setVisible(true);
       keys.requestFocusInWindow();
+      box[0] = frame;
     });
+    return box[0];
+  }
+
+  /**
+   * Everything the window-closed path has to do: stop the MIDI player, stop the 60 fps poll (a
+   * running Swing Timer keeps the EDT alive after dispose), close the audio stream. If anything here
+   * is missed the process survives its own window.
+   */
+  static void cleanup(javax.sound.midi.Sequencer player, ScopePanel scope) {
+    MidiIn.closeQuietly(player);
+    scope.stop();
+    Engine.stop();
   }
 
   /** Headless self-check: start the stream, play four notes, report underruns, bounce a WAV. */
