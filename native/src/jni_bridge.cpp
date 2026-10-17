@@ -107,3 +107,7 @@ extern "C" JNIEXPORT jlong JNICALL Java_synth_Engine_underrunCount(JNIEnv *, jcl
 extern "C" JNIEXPORT jint JNICALL Java_synth_Engine_activeVoices(JNIEnv *, jclass) {
   return engine().activeVoices();
 }
+
+extern "C" JNIEXPORT jint JNICALL Java_synth_Engine_bufferFrames(JNIEnv *, jclass) {
+  return static_cast<jint>(engine().bufferFrames());
+}
